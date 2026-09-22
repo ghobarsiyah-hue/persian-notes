@@ -1,0 +1,239 @@
+/* ============================================================
+   Persian Font Pack — PersianNote
+   ۴ فونت اصلی (B Titr, Shabnam, Sahel, Dast Nevis) + فونت‌های
+   جدید (آیتم ۱۴): فارسی/عربی — Samim, Tanha, Gandom, Parastoo,
+   Lalezar, Noto Naskh Arabic, Markazi Text
+   انگلیسی — Inter, Merriweather, Comic Sans (فالبک Comic Neue)
+   همه از CDN (jsDelivr) با font-display: swap لود می‌شوند.
+   ============================================================ */
+
+/* ─────────────── ۱. B Titr — تیتر ضخیم ───────────────
+   NOTE: the rahatool/persian-fonts repo has NO «main» branch (only
+   «development») and keeps the font files in the repo ROOT — the previous
+   @main/fonts/… URLs 404'd and B Titr silently fell back to Tahoma. */
+@font-face {
+  font-family: 'B Titr';
+  src: url('https://cdn.jsdelivr.net/gh/rahatool/persian-fonts@development/Titr.bold.woff2') format('woff2'),
+       url('https://cdn.jsdelivr.net/gh/rahatool/persian-fonts@development/Titr.bold.woff') format('woff');
+  font-weight: bold;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ─────────────── ۲. Shabnam (شبنم) ─────────────── */
+@font-face {
+  font-family: 'Shabnam';
+  src: url('https://cdn.jsdelivr.net/gh/rastikerdar/shabnam-font@v5.0.0/dist/Shabnam.woff2') format('woff2'),
+       url('https://cdn.jsdelivr.net/gh/rastikerdar/shabnam-font@v5.0.0/dist/Shabnam.woff') format('woff');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Shabnam';
+  src: url('https://cdn.jsdelivr.net/gh/rastikerdar/shabnam-font@v5.0.0/dist/Shabnam-Bold.woff2') format('woff2'),
+       url('https://cdn.jsdelivr.net/gh/rastikerdar/shabnam-font@v5.0.0/dist/Shabnam-Bold.woff') format('woff');
+  font-weight: bold;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ─────────────── ۳. Sahel (ساحل) ─────────────── */
+@font-face {
+  font-family: 'Sahel';
+  src: url('https://cdn.jsdelivr.net/gh/rastikerdar/sahel-font@v3.4.0/dist/Sahel.woff2') format('woff2'),
+       url('https://cdn.jsdelivr.net/gh/rastikerdar/sahel-font@v3.4.0/dist/Sahel.woff') format('woff');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Sahel';
+  src: url('https://cdn.jsdelivr.net/gh/rastikerdar/sahel-font@v3.4.0/dist/Sahel-Bold.woff2') format('woff2'),
+       url('https://cdn.jsdelivr.net/gh/rastikerdar/sahel-font@v3.4.0/dist/Sahel-Bold.woff') format('woff');
+  font-weight: bold;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ─────────────── ۴. Dast Nevis (دست‌نویس) ───────────────
+   The original DastNevis font has no official web files / CDN repo, so the
+   previous URLs pointed at a NON-EXISTENT repo (vazir-font@v27.0.1 relabeled
+   as 'Dast Nevis') and the face never loaded — picking it did nothing. The
+   entry now serves the Vazirmatn light weights under the menu name, a real
+   licensed (OFL) web font with a matching light handwriting feel. */
+@font-face {
+  font-family: 'Dast Nevis';
+  src: url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/fonts/webfonts/Vazirmatn-Light.woff2') format('woff2'),
+       url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/fonts/webfonts/Vazirmatn-Light.woff') format('woff');
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Dast Nevis';
+  src: url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/fonts/webfonts/Vazirmatn-Regular.woff2') format('woff2'),
+       url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/fonts/webfonts/Vazirmatn-Regular.woff') format('woff');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ─────────────── ۵. Samim (صمیم) — پاک و مدرن ─────────────── */
+@font-face {
+  font-family: 'Samim';
+  src: url('https://cdn.jsdelivr.net/gh/rastikerdar/samim-font@v4.0.5/dist/Samim.woff2') format('woff2'),
+       url('https://cdn.jsdelivr.net/gh/rastikerdar/samim-font@v4.0.5/dist/Samim.woff') format('woff');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Samim';
+  src: url('https://cdn.jsdelivr.net/gh/rastikerdar/samim-font@v4.0.5/dist/Samim-Bold.woff2') format('woff2'),
+       url('https://cdn.jsdelivr.net/gh/rastikerdar/samim-font@v4.0.5/dist/Samim-Bold.woff') format('woff');
+  font-weight: bold;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ─────────────── ۶. Tanha (تنها) — گرد و دست‌نویس ─────────────── */
+@font-face {
+  font-family: 'Tanha';
+  src: url('https://cdn.jsdelivr.net/gh/rastikerdar/tanha-font@v0.10/dist/Tanha.woff2') format('woff2'),
+       url('https://cdn.jsdelivr.net/gh/rastikerdar/tanha-font@v0.10/dist/Tanha.woff') format('woff');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ─────────────── ۷. Gandom (گندم) — گرم و مطالعه‌پسند ─────────────── */
+@font-face {
+  font-family: 'Gandom';
+  src: url('https://cdn.jsdelivr.net/gh/rastikerdar/gandom-font@v0.8/dist/Gandom.woff2') format('woff2'),
+       url('https://cdn.jsdelivr.net/gh/rastikerdar/gandom-font@v0.8/dist/Gandom.woff') format('woff');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ─────────────── ۸. Parastoo (پرستو) — سریف فارسی برای متن بلند ─────────────── */
+@font-face {
+  font-family: 'Parastoo';
+  src: url('https://cdn.jsdelivr.net/gh/rastikerdar/parastoo-font@v2.0.1/dist/Parastoo.woff2') format('woff2'),
+       url('https://cdn.jsdelivr.net/gh/rastikerdar/parastoo-font@v2.0.1/dist/Parastoo.woff') format('woff');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Parastoo';
+  src: url('https://cdn.jsdelivr.net/gh/rastikerdar/parastoo-font@v2.0.1/dist/Parastoo-Bold.woff2') format('woff2'),
+       url('https://cdn.jsdelivr.net/gh/rastikerdar/parastoo-font@v2.0.1/dist/Parastoo-Bold.woff') format('woff');
+  font-weight: bold;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ─────────────── ۹. Lalezar (لاله‌زار) — تیتر فانتزی نمایشی ─────────────── */
+@font-face {
+  font-family: 'Lalezar';
+  src: url('https://cdn.jsdelivr.net/fontsource/fonts/lalezar@latest/arabic-400-normal.woff2') format('woff2'),
+       url('https://cdn.jsdelivr.net/fontsource/fonts/lalezar@latest/arabic-400-normal.woff') format('woff');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ─────────────── ۱۰. Noto Naskh Arabic (نسخ) — کتابت کلاسیک ─────────────── */
+@font-face {
+  font-family: 'Noto Naskh Arabic';
+  src: url('https://cdn.jsdelivr.net/fontsource/fonts/noto-naskh-arabic@latest/arabic-400-normal.woff2') format('woff2'),
+       url('https://cdn.jsdelivr.net/fontsource/fonts/noto-naskh-arabic@latest/arabic-400-normal.woff') format('woff');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Noto Naskh Arabic';
+  src: url('https://cdn.jsdelivr.net/fontsource/fonts/noto-naskh-arabic@latest/arabic-700-normal.woff2') format('woff2'),
+       url('https://cdn.jsdelivr.net/fontsource/fonts/noto-naskh-arabic@latest/arabic-700-normal.woff') format('woff');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ─────────────── ۱۱. Markazi Text (مرکزی) — سریف مطالعه‌پسند ─────────────── */
+@font-face {
+  font-family: 'Markazi Text';
+  src: url('https://cdn.jsdelivr.net/fontsource/fonts/markazi-text@latest/arabic-400-normal.woff2') format('woff2'),
+       url('https://cdn.jsdelivr.net/fontsource/fonts/markazi-text@latest/arabic-400-normal.woff') format('woff');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Markazi Text';
+  src: url('https://cdn.jsdelivr.net/fontsource/fonts/markazi-text@latest/arabic-700-normal.woff2') format('woff2'),
+       url('https://cdn.jsdelivr.net/fontsource/fonts/markazi-text@latest/arabic-700-normal.woff') format('woff');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ─────────────── ۱۲. Inter — انگلیسی مدرن ─────────────── */
+@font-face {
+  font-family: 'Inter';
+  src: url('https://cdn.jsdelivr.net/fontsource/fonts/inter@latest/latin-400-normal.woff2') format('woff2'),
+       url('https://cdn.jsdelivr.net/fontsource/fonts/inter@latest/latin-400-normal.woff') format('woff');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Inter';
+  src: url('https://cdn.jsdelivr.net/fontsource/fonts/inter@latest/latin-700-normal.woff2') format('woff2'),
+       url('https://cdn.jsdelivr.net/fontsource/fonts/inter@latest/latin-700-normal.woff') format('woff');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ─────────────── ۱۳. Merriweather — انگلیسی سریف کلاسیک ─────────────── */
+@font-face {
+  font-family: 'Merriweather';
+  src: url('https://cdn.jsdelivr.net/fontsource/fonts/merriweather@latest/latin-400-normal.woff2') format('woff2'),
+       url('https://cdn.jsdelivr.net/fontsource/fonts/merriweather@latest/latin-400-normal.woff') format('woff');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Merriweather';
+  src: url('https://cdn.jsdelivr.net/fontsource/fonts/merriweather@latest/latin-700-normal.woff2') format('woff2'),
+       url('https://cdn.jsdelivr.net/fontsource/fonts/merriweather@latest/latin-700-normal.woff') format('woff');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ─────────────── ۱۴. Comic Sans — سیستم‌فونت؛ فالبک وب: Comic Neue (OFL) ─────────────── */
+/* ویندوز/مک: Comic Sans MS واقعی سیستم لود می‌شود؛ بقیه: Comic Neue از CDN */
+@font-face {
+  font-family: 'Comic Sans';
+  src: local('Comic Sans MS'), local('ComicNeue-Regular'),
+       url('https://cdn.jsdelivr.net/fontsource/fonts/comic-neue@latest/latin-400-normal.woff2') format('woff2'),
+       url('https://cdn.jsdelivr.net/fontsource/fonts/comic-neue@latest/latin-400-normal.woff') format('woff');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Comic Sans';
+  src: local('Comic Sans MS Bold'), local('ComicNeue-Bold'),
+       url('https://cdn.jsdelivr.net/fontsource/fonts/comic-neue@latest/latin-700-normal.woff2') format('woff2'),
+       url('https://cdn.jsdelivr.net/fontsource/fonts/comic-neue@latest/latin-700-normal.woff') format('woff');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}

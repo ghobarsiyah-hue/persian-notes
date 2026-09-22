@@ -1,0 +1,41 @@
+<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>Ribbon overlays</title></head><body><div id="root"></div><pre id="out">RUNNING</pre><script type="module">
+import '/src/index.css';
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { RibbonDropdown, RibbonPanel, FileMenu } from '/src/editor/ribbon/RibbonUI.tsx';
+import { ContextualToolRow } from '/src/editor/ribbon/contextual/ContextualToolRow.tsx';
+const h = React.createElement;
+let clicks = 0;
+const content = h('button', { id: 'inside', 'data-keep-open': true, onClick: () => clicks++ }, 'ویرایش');
+function Test({ mode }) {
+ const [open, setOpen] = React.useState(false);
+ const button = { title: 'trigger', label: 'باز کردن' };
+ const props = { button, open, onOpen: () => setOpen(true), onClose: () => setOpen(false) };
+ const panel = mode === 'dropdown' ? h(RibbonDropdown, { button }, content)
+ : mode === 'panel' ? h(RibbonPanel, props, content)
+ : mode === 'file' ? h(FileMenu, { items: content, open, onToggle: () => setOpen(!open), onClose: () => setOpen(false) })
+ : h(ContextualToolRow, { tab: { groups: [{ key: 'test', tools: [{ key: 'test', title: 'trigger', label: 'باز کردن', dropdown: { width: 220, render: () => content } }] }] } });
+ return h('div', { id: 'host', style: { position: 'relative', zIndex: 1, marginTop: 90, marginRight: 100, width: 300, height: 45, overflow: 'hidden', transform: 'translateX(-15px)', backdropFilter: 'blur(20px)' } }, panel);
+}
+const root = createRoot(document.getElementById('root'));
+const wait = () => new Promise(r => setTimeout(r, 200));
+const results = [];
+const check = (ok, label) => { results.push(`${ok ? 'PASS' : 'FAIL'} ${label}`); document.getElementById('out').textContent = results.join('\n'); };
+(async () => {
+ for (const mode of ['dropdown', 'panel', 'file', 'contextual']) {
+  root.render(h(Test, { key: mode, mode })); await wait();
+  const trigger = document.querySelector('#host button'); trigger.click(); await wait();
+  const inside = document.getElementById('inside'); const panel = inside?.parentElement;
+  check(panel?.parentElement === document.body, `${mode}: portal outside transformed/clipped toolbar`);
+  if (!panel) continue;
+  const anchor = trigger.parentElement.getBoundingClientRect(); const rect = panel.getBoundingClientRect();
+  check(Math.abs(rect.top - anchor.bottom - 6) < 2, `${mode}: aligned beneath anchor`);
+  check(panel.contains(document.elementFromPoint(rect.left + 10, rect.top + 10)), `${mode}: visible hit target`);
+  const before = clicks; inside.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); await wait();
+  check(inside.isConnected, `${mode}: inside mousedown does not close panel`);
+  inside.click(); await wait(); check(clicks === before + 1, `${mode}: action executes`);
+  document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); await wait();
+  check(!document.getElementById('inside'), `${mode}: outside click closes`);
+ }
+})().catch(e => check(false, String(e)));
+</script></body></html>

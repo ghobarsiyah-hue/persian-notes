@@ -1,0 +1,2360 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ================================================================
+   Vercel Design System for PersianNote
+   Shadow-as-border · Geist typography · Multi-layer elevation
+   ================================================================ */
+
+@layer base {
+  html {
+    font-family: 'Sahel', 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-feature-settings: 'liga' 1;
+    color-scheme: light dark;
+    -webkit-tap-highlight-color: transparent;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  body {
+    background: #fafafa;
+    color: #171717;
+  }
+  .dark body {
+    background: #0a0a0a;
+    color: #ededed;
+  }
+  ::selection {
+    background: #111;
+    color: #fff;
+    text-shadow: none;
+  }
+  .dark ::selection {
+    background: #333;
+    color: #fff;
+  }
+}
+
+@layer components {
+  /* Vercel focus ring: only keyboard */
+  :focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px #fafafa, 0 0 0 4px #0070f3;
+  }
+  .dark :focus-visible {
+    box-shadow: 0 0 0 2px #0a0a0a, 0 0 0 4px #0070f3;
+  }
+}
+
+/* ================================================================
+   Vercel Shadow-Border Tokens
+   
+   The shadow-border technique replaces CSS borders with layered
+   box-shadows for crisper edges and smoother transitions.
+   ================================================================ */
+@layer components {
+  /* Card / Surface */
+  .pn-shadow-border {
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.08),
+      0 2px 4px rgba(0, 0, 0, 0.04);
+  }
+  .dark .pn-shadow-border {
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.08),
+      0 2px 4px rgba(0, 0, 0, 0.2);
+  }
+
+  /* Card elevated */
+  .pn-shadow-card {
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.08),
+      0 2px 4px rgba(0, 0, 0, 0.04),
+      0 8px 24px rgba(0, 0, 0, 0.04);
+  }
+  .dark .pn-shadow-card {
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.08),
+      0 2px 4px rgba(0, 0, 0, 0.2),
+      0 8px 24px rgba(0, 0, 0, 0.3);
+  }
+
+  /* Popover / Modal */
+  .pn-shadow-popover {
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.08),
+      0 4px 8px rgba(0, 0, 0, 0.04),
+      0 16px 48px rgba(0, 0, 0, 0.08);
+  }
+  .dark .pn-shadow-popover {
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.08),
+      0 4px 8px rgba(0, 0, 0, 0.2),
+      0 16px 48px rgba(0, 0, 0, 0.4);
+  }
+
+  /* Input / Select */
+  .pn-shadow-input {
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.08),
+      0 1px 2px rgba(0, 0, 0, 0.04);
+  }
+  .dark .pn-shadow-input {
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.08),
+      0 1px 2px rgba(0, 0, 0, 0.2);
+  }
+
+  /* Input focus */
+  .pn-shadow-input-focus {
+    box-shadow:
+      0 0 0 1px rgba(0, 112, 243, 0.4),
+      0 0 0 3px rgba(0, 112, 243, 0.1);
+  }
+
+  /* Active / Pressed */
+  .pn-shadow-active {
+    box-shadow:
+      inset 0 1px 2px rgba(0, 0, 0, 0.06),
+      0 0 0 1px rgba(0, 0, 0, 0.08);
+  }
+}
+
+/* ================================================================
+   Animations — compositor-friendly only (transform, opacity)
+   ================================================================ */
+@keyframes pn-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes pn-slide-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pn-dock-in {
+  from { transform: translateX(-24px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes pn-scale-in {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes pn-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ================================================================
+   ProseMirror editor — Vercel-clean typography
+   ================================================================ */
+.ProseMirror {
+  outline: none;
+  /* min-height comes from .page-content (height:100% of the sheet's usable
+     box) — the editor always fills the page's writing area; long content
+     overflows the fixed sheet instead of stretching it. */
+  min-height: 100%;
+  font-size: var(--editor-font-size, 16px);
+  line-height: var(--editor-line-height, 2);
+  color: #171717;
+  caret-color: #0070f3;
+  letter-spacing: -0.01em;
+}
+.dark .ProseMirror {
+  color: #ededed;
+}
+.ProseMirror p {
+  margin: 0 0 0.5em;
+  text-align: justify;
+  text-justify: inter-word;
+}
+.ProseMirror h1,
+.ProseMirror h2,
+.ProseMirror h3,
+.ProseMirror h4 {
+  color: #171717;
+  font-weight: 700;
+  margin: 1em 0 0.4em;
+  letter-spacing: -0.04em;
+  text-wrap: balance;
+}
+.dark .ProseMirror h1,
+.dark .ProseMirror h2,
+.dark .ProseMirror h3,
+.dark .ProseMirror h4 {
+  color: #ededed;
+}
+.ProseMirror h1 {
+  font-size: 1.8em;
+  letter-spacing: -0.05em;
+  line-height: 1.15;
+}
+.ProseMirror h2 {
+  font-size: 1.35em;
+  letter-spacing: -0.04em;
+  line-height: 1.25;
+  padding-bottom: 0.3em;
+  box-shadow: inset 0 -1px 0 0 rgba(0, 0, 0, 0.08);
+}
+.dark .ProseMirror h2 {
+  box-shadow: inset 0 -1px 0 0 rgba(255, 255, 255, 0.08);
+}
+.ProseMirror h3 {
+  font-size: 1.15em;
+  letter-spacing: -0.03em;
+}
+.ProseMirror h4 {
+  font-size: 1.02em;
+  letter-spacing: -0.02em;
+  color: #666;
+}
+.dark .ProseMirror h4 {
+  color: #888;
+}
+.ProseMirror ul,
+.ProseMirror ol {
+  list-style-type: disc;
+  padding-right: 1.6em;
+  padding-left: 0;
+  margin: 0 0 0.5em;
+}
+.ProseMirror ol {
+  list-style-type: decimal;
+}
+.ProseMirror ul li::marker { color: #0070f3; }
+.ProseMirror ol li::marker { color: #114b64; font-weight: 600; }
+/* ── ListMarker (data-marker) — per-list glyph control ──────────────────
+   The ribbon/contextual menu sets ONE token on the list node; the glyph
+   is painted here with CSS counters so every line gets its own dot/number
+   and the choice survives save/load. printCss mirrors these rules 1:1. */
+/* bullets — variants */
+.ProseMirror ul[data-marker='circle'] { list-style-type: circle; }
+.ProseMirror ul[data-marker='square'] { list-style-type: square; }
+.ProseMirror ul[data-marker='diamond'] { list-style-type: none; }
+.ProseMirror ul[data-marker='diamond'] > li { position: relative; }
+.ProseMirror ul[data-marker='diamond'] > li::before {
+  content: '\25C6'; position: absolute; right: -1.35em; top: 0.08em;
+  color: #0070f3; font-size: 0.62em;
+}
+.ProseMirror ul[data-marker='dash'] { list-style-type: none; }
+.ProseMirror ul[data-marker='dash'] > li { position: relative; }
+.ProseMirror ul[data-marker='dash'] > li::before {
+  content: '\2014'; position: absolute; right: -1.25em; top: 0;
+  color: #114b64; font-weight: 600;
+}
+.ProseMirror ul[data-marker='none'] { list-style-type: none; }
+/* numbers — variants (counters so parentheses/letters render right) */
+.ProseMirror ol[data-marker='decimal'] { list-style-type: decimal; }
+.ProseMirror ol[data-marker='fa'] { list-style-type: none; counter-reset: pn-list; }
+.ProseMirror ol[data-marker='fa'] > li { position: relative; counter-increment: pn-list; }
+.ProseMirror ol[data-marker='fa'] > li::before {
+  content: counter(pn-list, persian) '.';
+  position: absolute; right: -1.6em; top: 0;
+  color: #114b64; font-weight: 600;
+}
+.ProseMirror ol[data-marker='paren'] { list-style-type: none; counter-reset: pn-list; }
+.ProseMirror ol[data-marker='paren'] > li { position: relative; counter-increment: pn-list; }
+.ProseMirror ol[data-marker='paren'] > li::before {
+  content: counter(pn-list, arabic-indic) ')';
+  position: absolute; right: -1.6em; top: 0;
+  color: #114b64; font-weight: 600;
+}
+.ProseMirror ol[data-marker='alpha'] { list-style-type: lower-alpha; }
+.ProseMirror ol[data-marker='roman'] { list-style-type: upper-roman; }
+.ProseMirror ol[data-marker='none'] { list-style-type: none; }
+.ProseMirror ul[data-type='taskList'] { padding-right: 0.2em; list-style: none; }
+.ProseMirror ul[data-type='taskList'] li { display: flex; align-items: flex-start; gap: 0.5em; }
+.ProseMirror ul[data-type='taskList'] li::before { display: none; }
+.ProseMirror ul[data-type='taskList'] input[type='checkbox'] {
+  width: 1.1em;
+  height: 1.1em;
+  margin-top: 0.35em;
+  accent-color: #0070f3;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.ProseMirror blockquote {
+  box-shadow: inset 3px 0 0 0 #0070f3;
+  margin: 0.5em 0;
+  padding: 0.4em 1em;
+  color: #444;
+  background: rgba(0, 112, 243, 0.03);
+  border-radius: 0 6px 6px 0;
+}
+.dark .ProseMirror blockquote { color: #aaa; background: rgba(0, 112, 243, 0.06); }
+.ProseMirror code {
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-size: 0.88em;
+  font-family: 'Geist Mono', 'SF Mono', Consolas, monospace;
+}
+.dark .ProseMirror code { background: rgba(255, 255, 255, 0.08); }
+/* Inline icon (icon picker) — vector SVG that flows with the text like a
+   character and scales with the paragraph font size (em-based). */
+.ProseMirror img.pn-inline-icon {
+  display: inline-block;
+  width: 1.45em;
+  height: 1.45em;
+  vertical-align: -0.32em;
+  object-fit: contain;
+  margin: 0 0.08em;
+  user-select: none;
+}
+.ProseMirror pre {
+  background: #fafafa;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.08),
+    0 2px 4px rgba(0, 0, 0, 0.04);
+  border-radius: 8px;
+  padding: 0.8em 1em;
+  direction: ltr;
+  text-align: left;
+  font-size: 0.88em;
+  overflow-x: auto;
+}
+.dark .ProseMirror pre {
+  background: #111;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+/* BUG «عرض کلیشون قفل شده»: the blanket width:100% made EVERY drag-resize
+   handle a no-op — prosemirror-tables sizes columns by writing px widths
+   into <colgroup>, but a fixed 100% table width re-distributes them, and
+   TableRowResizing's whole-table grip (width attr in %) was equally
+   absorbed. Tables WITHOUT an explicit width keep the full-bleed default;
+   resized tables carry their real width as an inline style written by the
+   table node view from the doc's width attr (which also survives
+   save/load and matches getHTML for exports). */
+.ProseMirror table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: var(--pn-table-w, 100%);
+  min-width: 120px;
+  margin: 0.6em 0;
+  overflow: hidden;
+  border-radius: 8px;
+  /* BUG-1 fix (no background bleed): the TABLE is the opaque object on the
+     page — one surface under all cells (the notebook ruling / page
+     background must not show through). Cells themselves stay transparent
+     so striped rows (راه‌راه), navy headers and cell-color fills can layer
+     on top of this surface — per-cell opaque backgrounds previously PAINTED
+     OVER the striping (راه‌راه worked only on fresh/unsaved tables). */
+  background: var(--page-surface, #ffffff);
+}
+.dark .ProseMirror table {
+  background: var(--page-surface-dark, #171717);
+}
+.ProseMirror table td,
+.ProseMirror table th {
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  padding: 8px 12px;
+  vertical-align: top;
+  position: relative;
+  background: transparent; /* surface comes from the table (see above) */
+}
+.dark .ProseMirror table td,
+.dark .ProseMirror table th {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+.ProseMirror table th {
+  background: #fafafa;
+  color: #171717;
+  font-weight: 600;
+  font-size: 0.9em;
+}
+.dark .ProseMirror table th { background: #1a1a1a; color: #ededed; }
+
+/* ── table design (طراحی جدول) — data-attrs set from the contextual tab ──
+   The SAME rules live in printCss (print/PDF) and are baked inline by the
+   Word exporter, so a designed table renders identically everywhere. */
+.ProseMirror table[data-cellpad='compact'] td,
+.ProseMirror table[data-cellpad='compact'] th { padding: 4px 6px; }
+.ProseMirror table[data-cellpad='roomy'] td,
+.ProseMirror table[data-cellpad='roomy'] th { padding: 14px 18px; }
+.ProseMirror table[data-borderless='true'] td,
+.ProseMirror table[data-borderless='true'] th { border-color: transparent; }
+/* nth-of-type — NOT nth-child: a table's <colgroup> is a child too, so
+   nth-child shifts every row (editor always renders colgroup; exported
+   HTML gains one after any column resize) → striping/academic rules would
+   land on different rows in the editor vs PDF/preview. */
+.ProseMirror table[data-striped='true'] tr:nth-of-type(even) td { background: #f4f4f5; }
+.dark .ProseMirror table[data-striped='true'] tr:nth-of-type(even) td { background: #262626; }
+.ProseMirror table[data-align='center'] { margin-inline: auto; }
+.ProseMirror table[data-align='left'] { margin-inline: auto auto 0.6em; }
+.ProseMirror table[data-align='right'] { margin-inline: 0.6em auto; }
+
+/* ── table style templates (قالب‌های آماده) — data-tstyle tokens ──
+   The SAME token rules exist in printCss (PDF) and are baked inline by the
+   Word exporter, so a preset look is identical in editor, PDF and Word. */
+.ProseMirror table[data-tstyle='navy'] th { background: #1e3a5f; color: #ffffff; }
+.ProseMirror table[data-tstyle='soft'] td,
+.ProseMirror table[data-tstyle='soft'] th { border-color: #d8dee6; }
+.ProseMirror table[data-tstyle='soft'] th { background: #f0f4f8; }
+.ProseMirror table[data-tstyle='minimal'] td,
+.ProseMirror table[data-tstyle='minimal'] th { border: none; border-bottom: 1px solid #e2e5ea; }
+.ProseMirror table[data-tstyle='minimal'] th { border-bottom: 2px solid #9aa4af; }
+.ProseMirror table[data-tstyle='academic'] td,
+.ProseMirror table[data-tstyle='academic'] th { border: none; }
+.ProseMirror table[data-tstyle='academic'] tr:first-of-type td,
+.ProseMirror table[data-tstyle='academic'] tr:first-of-type th { border-top: 2px solid #171717; }
+.ProseMirror table[data-tstyle='academic'] th { border-bottom: 2px solid #171717; }
+.ProseMirror table[data-tstyle='academic'] tr:last-of-type td,
+.ProseMirror table[data-tstyle='academic'] tr:last-of-type th { border-bottom: 2px solid #171717; }
+.ProseMirror table[data-tstyle='bold'] td,
+.ProseMirror table[data-tstyle='bold'] th { border: 2px solid #565656; }
+.ProseMirror table[data-tstyle='plain'] td,
+.ProseMirror table[data-tstyle='plain'] th { border-color: transparent; }
+
+/* ── table resize interactions (TableRowResizing) ────────────────────
+   Row strip: hover near a row's bottom border → a 12px grab zone centered
+   EXACTLY on the border with a blue line + grip dot, cursor ns-resize.
+   Table grip: hovering a table → a corner square at the table's bottom-left
+   (RTL end) to resize the WHOLE table width, cursor nwse-resize. */
+.pn-row-resize-handle {
+  position: absolute;
+  height: 12px;
+  width: 0;
+  z-index: 40;
+  cursor: ns-resize;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+.pn-row-resize-handle--on { opacity: 1; }
+.pn-row-resize-handle::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 5px;
+  height: 2px;
+  background: #0070f3;
+  border-radius: 2px;
+  opacity: 0.85;
+}
+.pn-row-resize-handle::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  inset-inline-end: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+  background: #0070f3;
+  box-shadow: 0 1px 3px rgba(0, 112, 243, 0.45);
+}
+.pn-row-resize-handle--drag::after { opacity: 1; box-shadow: 0 0 6px rgba(0, 112, 243, 0.55); }
+
+.pn-table-resize-grip {
+  position: absolute;
+  width: 13px;
+  height: 13px;
+  z-index: 40;
+  cursor: nwse-resize;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+  background: #0070f3;
+  border-radius: 3px;
+  box-shadow: 0 0 0 2px #ffffff, 0 2px 6px rgba(0, 112, 243, 0.45);
+}
+.dark .pn-table-resize-grip { box-shadow: 0 0 0 2px #171717, 0 2px 6px rgba(0, 112, 243, 0.5); }
+.pn-table-resize-grip::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 1px;
+  background:
+    linear-gradient(135deg, transparent 0 44%, rgba(255,255,255,0.85) 44% 56%, transparent 56%),
+    linear-gradient(315deg, transparent 0 44%, rgba(255,255,255,0.85) 44% 56%, transparent 56%);
+}
+.pn-table-resize-grip--on { opacity: 1; }
+.pn-table-resize-grip--drag { opacity: 1; box-shadow: 0 0 0 2px #ffffff, 0 0 10px rgba(0, 112, 243, 0.7); }
+
+/* column-resize hover/drag (prosemirror-tables toggles this class on the
+   editor root) — without this rule the cursor stays the text I-beam */
+.resize-cursor,
+.resize-cursor * { cursor: col-resize !important; }
+.ProseMirror table .selectedCell:after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 112, 243, 0.08);
+  pointer-events: none;
+}
+.ProseMirror img {
+  max-width: 100%;
+  border-radius: 8px;
+  margin: 0.5em 0;
+}
+/* image alignment set from the ابزار تصویر contextual menu (data-align attr
+   on the img node) — same rules apply in print/export via .pn-doc-body */
+.ProseMirror img[data-align='center'],
+.pn-doc-body img[data-align='center'] {
+  display: block;
+  margin-inline: auto;
+}
+.ProseMirror img[data-align='left'],
+.pn-doc-body img[data-align='left'] {
+  display: block;
+  margin-inline: auto auto 0.5em;
+}
+.ProseMirror img[data-align='right'],
+.pn-doc-body img[data-align='right'] {
+  display: block;
+  margin-inline: 0.5em auto;
+}
+/* hr styling is in the Page Break section below */
+.ProseMirror a {
+  color: #0070f3;
+  text-decoration: underline;
+  text-decoration-color: rgba(0, 112, 243, 0.3);
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+.ProseMirror a:hover {
+  text-decoration-color: #0070f3;
+}
+.ProseMirror mark {
+  background: #111;
+  color: #fff;
+  padding: 0.05em 0.1em;
+  border-radius: 2px;
+  text-shadow: none;
+}
+.dark .ProseMirror mark {
+  background: #333;
+  color: #fff;
+}
+.ProseMirror p.is-editor-empty:first-child::before,
+.ProseMirror .is-empty::before {
+  content: attr(data-placeholder);
+  color: #999;
+  pointer-events: none;
+  height: 0;
+  float: right;
+}
+.dark .ProseMirror p.is-editor-empty:first-child::before,
+.dark .ProseMirror .is-empty::before {
+  color: #555;
+}
+.ProseMirror-gapcursor:after { border-top-color: #171717; }
+.ProseMirror .edu-block.ProseMirror-selectednode {
+  outline: 2px solid #0070f3;
+  outline-offset: 2px;
+}
+
+/* ================================================================
+   Educational blocks — clean Vercel style
+   ================================================================ */
+/* minimal by default: crisp 1.5px border, small radius, NO background tint —
+   the page background shows through so users can style freely.
+   Opt back into colored boxes with the `.edu-tinted` scope (settings). */
+.edu-block {
+  border: 1.5px solid rgba(0, 0, 0, 0.14);
+  border-radius: 4px;
+  margin: 0.6em 0;
+  padding: 0.6em 0.9em;
+  position: relative;
+  background: transparent;
+  box-shadow: none;
+}
+.edu-block > div:last-child > p:last-child { margin-bottom: 0; }
+.edu-title {
+  font-weight: 600;
+  margin-bottom: 0.3em;
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  font-size: 0.9em;
+  letter-spacing: -0.01em;
+}
+.edu-definition .edu-title { color: #0070f3; }
+.edu-important .edu-title { color: #b45309; }
+.edu-exam .edu-title { color: #175e7d; }
+.edu-warning .edu-title { color: #dc2626; }
+.edu-summary .edu-title { color: #0070f3; }
+.edu-question .edu-title { color: #7928ca; }
+.edu-example .edu-title { color: #175e7d; }
+.edu-keyterm .edu-title { color: #7928ca; }
+.edu-formula {
+  text-align: center;
+  padding: 0.8em;
+}
+.edu-answer { border-top: 1px solid rgba(0, 0, 0, 0.06); margin-top: 0.4em; padding-top: 0.4em; color: #666; }
+.edu-highlight .edu-title { color: #b45309; }
+.edu-reference .edu-title { color: #7928ca; }
+.edu-procon .edu-title { color: #0070f3; }
+.edu-codeoutput .edu-title { color: #0070f3; }
+
+/* editable block titles (icon + text spans) */
+.edu-title-icon { display: inline-flex; align-items: center; opacity: 0.85; }
+.edu-title-icon svg { display: block; }
+.edu-title-text { flex: 1; min-width: 2em; outline: none; border-radius: 4px; }
+.edu-title-text:focus { box-shadow: 0 0 0 2px rgba(0, 112, 243, 0.25); }
+.edu-title-text:empty::before { content: attr(data-ph); opacity: 0.4; }
+.edu-title-suffix { opacity: 0.6; font-weight: 500; font-size: 0.85em; white-space: nowrap; }
+
+/* pro/con columns — flat paper style, no gradients */
+.edu-procon-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 6px; }
+.edu-procon-col { border-radius: 8px; padding: 8px 12px; }
+.edu-procon-pro { background: rgba(31, 115, 150, 0.06); box-shadow: inset 0 0 0 1px rgba(31, 115, 150, 0.25); }
+.edu-procon-con { background: rgba(220, 38, 38, 0.05); box-shadow: inset 0 0 0 1px rgba(220, 38, 38, 0.22); }
+.edu-procon-label { font-weight: 700; font-size: 0.85em; margin-bottom: 4px; }
+.edu-procon-pro .edu-procon-label { color: #175e7d; }
+.edu-procon-con .edu-procon-label { color: #b91c1c; }
+.edu-procon-text { font-size: 0.9em; min-height: 2.5em; outline: none; white-space: pre-wrap; }
+.edu-procon-text:empty::before, .edu-code-area:empty::before { content: attr(data-ph); opacity: 0.4; }
+.edu-procon-legacy, .edu-codeoutput-legacy { font-size: 0.9em; }
+
+/* code / output areas — flat */
+.edu-code-area, .edu-code-out {
+  direction: ltr; text-align: left; font-family: 'Geist Mono', Consolas, monospace;
+  font-size: 13px; border-radius: 8px; padding: 10px 12px; margin: 4px 0 0;
+  white-space: pre-wrap; outline: none;
+}
+.edu-code-area { background: #f4f4f5; color: #27272a; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06); }
+.dark .edu-code-area { background: #1c1c1f; color: #d4d4d8; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+.edu-code-out { background: #fafafa; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08); min-height: 1.8em; }
+.dark .edu-code-out { background: #141416; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+.edu-code-out-label { font-size: 0.8em; color: #64748b; margin-top: 8px; font-weight: 600; }
+.edu-codeoutput .edu-title { color: #0070f3; }
+
+/* ── سوالات (quiz blocks): تشریحی / درست‌نادرست / چهارگزینه‌ای ───────────
+   Same .edu-block base + full style-attr support; only the question-
+   specific UI (option rows, TF buttons) is styled here.
+
+   THREE PER-BLOCK VARIANTS (data-qv on the wrapper, from شخصی‌سازی):
+   v1 «خط ظریف» — the shipped hairline rows (default, unchanged look)
+   v2 «کارت» — solid white cards, filled number chips, soft shadow
+   v3 «امتحانی» — squared paper look: dashed option rules, letter chips,
+      title underline — reads like a real exam sheet
+   answerAt='end' appends .quiz-end-answer AFTER the flow (spoiler-safe:
+   the correct option itself stays unpainted). */
+.edu-mcq .quiz-opts { margin: 2px 0 6px; }
+.quiz-opt {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 5px 8px;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.09);
+  background: rgba(0, 0, 0, 0.015);
+  margin-bottom: 6px;
+  transition: background 0.12s, box-shadow 0.12s;
+}
+.quiz-opts-grid .quiz-opt { width: calc(50% - 3px); }
+.quiz-opts-grid { display: flex; flex-wrap: wrap; gap: 6px 6px; }
+.quiz-opts-grid .quiz-opt { margin-bottom: 0; }
+.quiz-opt[data-correct="true"] {
+  background: rgba(22, 163, 74, 0.08);
+  box-shadow: inset 0 0 0 1.5px rgba(22, 163, 74, 0.55);
+}
+.quiz-opt-num {
+  flex: none;
+  width: 1.55em;
+  height: 1.55em;
+  border-radius: 50%;
+  border: none;
+  background: color-mix(in srgb, var(--q-accent, #0070f3) 10%, transparent);
+  color: var(--q-accent, #0070f3);
+  font-size: 0.82em;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s, color 0.12s;
+  font-family: inherit;
+}
+.quiz-opt[data-correct="true"] .quiz-opt-num {
+  background: #16a34a;
+  color: #fff;
+}
+.quiz-opt-text { flex: 1; min-width: 3em; outline: none; border-radius: 4px; font-size: 0.95em; }
+.quiz-opt-text:focus { box-shadow: 0 0 0 2px color-mix(in srgb, var(--q-accent, #0070f3) 30%, transparent); }
+.quiz-opt-text:empty::before { content: attr(data-ph); opacity: 0.4; }
+
+/* ── v2 «کارت» — solid white cards, filled chips, soft lift ── */
+.edu-mcq[data-qv="v2"] .quiz-opt {
+  box-shadow: inset 0 0 0 1.5px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.05);
+  background: #fff;
+  border-radius: 10px;
+  padding: 7px 11px;
+}
+.edu-mcq[data-qv="v2"] .quiz-opt:hover { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--q-accent, #0070f3) 45%, transparent), 0 1px 2px rgba(0, 0, 0, 0.05); }
+.edu-mcq[data-qv="v2"] .quiz-opt-num { background: var(--q-accent, #0070f3); color: #fff; border-radius: 8px; }
+.edu-mcq[data-qv="v2"] .quiz-opt[data-correct="true"] {
+  background: rgba(22, 163, 74, 0.07);
+  box-shadow: inset 0 0 0 2px #16a34a, 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+.edu-mcq[data-qv="v2"] .quiz-opt[data-correct="true"] .quiz-opt-num { background: #16a34a; border-radius: 8px; }
+.edu-mcq[data-qv="v2"] .quiz-opts-grid { gap: 8px; }
+.edu-mcq[data-qv="v2"] .quiz-opts-grid .quiz-opt { width: calc(50% - 4px); }
+.dark .edu-mcq[data-qv="v2"] .quiz-opt { background: rgba(255, 255, 255, 0.045); box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.13), 0 1px 2px rgba(0, 0, 0, 0.4); }
+.dark .edu-mcq[data-qv="v2"] .quiz-opt-num { background: #3291ff; }
+.dark .edu-mcq[data-qv="v2"] .quiz-opt[data-correct="true"] { box-shadow: inset 0 0 0 2px #22c55e, 0 1px 2px rgba(0, 0, 0, 0.4); }
+.dark .edu-mcq[data-qv="v2"] .quiz-opt[data-correct="true"] .quiz-opt-num { background: #22c55e; color: #06280f; }
+
+/* v2 on درست/نادرست — pill buttons with stronger fill when marked */
+.edu-truefalse[data-qv="v2"] .quiz-tf-btn { border-radius: 999px; padding: 6px 22px; box-shadow: inset 0 0 0 1.5px rgba(0, 0, 0, 0.1); }
+.dark .edu-truefalse[data-qv="v2"] .quiz-tf-btn { box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.13); }
+.edu-truefalse[data-qv="v2"] .quiz-tf-row[data-answer="true"] .quiz-tf-true,
+.edu-truefalse[data-qv="v2"] .quiz-tf-row[data-answer="false"] .quiz-tf-false { box-shadow: inset 0 0 0 2px currentColor; }
+
+/* ── v3 «امتحانی» — squared paper: dashed rules, letter chips, title underline ── */
+.edu-mcq[data-qv="v3"] .edu-title,
+.edu-truefalse[data-qv="v3"] .edu-title,
+.edu-longanswer[data-qv="v3"] .edu-title,
+.edu-question[data-qv="v3"] .edu-title {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  padding-bottom: 5px;
+}
+.edu-mcq[data-qv="v3"] .quiz-opts-stacked .quiz-opt {
+  background: transparent;
+  box-shadow: none;
+  border-radius: 4px;
+  padding: 5px 6px;
+  margin-bottom: 2px;
+  border-bottom: 1px dashed rgba(0, 0, 0, 0.16);
+}
+.edu-mcq[data-qv="v3"] .quiz-opts-stacked .quiz-opt:last-child { border-bottom: none; }
+.edu-mcq[data-qv="v3"] .quiz-opts-grid .quiz-opt {
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+  border-bottom: none;
+  margin-bottom: 6px;
+  background: transparent;
+}
+.edu-mcq[data-qv="v3"] .quiz-opt-num {
+  background: transparent;
+  color: inherit;
+  font-weight: 800;
+  border-radius: 4px;
+  min-width: 1.55em;
+  padding: 0 0.15em;
+}
+.edu-mcq[data-qv="v3"] .quiz-opt[data-correct="true"] {
+  box-shadow: inset 0 0 0 1.5px rgba(22, 163, 74, 0.55);
+  background: rgba(22, 163, 74, 0.05);
+}
+.edu-mcq[data-qv="v3"] .quiz-opt[data-correct="true"] .quiz-opt-num { color: #16a34a; background: rgba(22, 163, 74, 0.12); }
+.dark .edu-mcq[data-qv="v3"] .quiz-opts-stacked .quiz-opt { border-bottom-color: rgba(255, 255, 255, 0.12); }
+.dark .edu-mcq[data-qv="v3"] .quiz-opts-grid .quiz-opt { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14); }
+.dark .edu-mcq[data-qv="v3"] .edu-title,
+.dark .edu-truefalse[data-qv="v3"] .edu-title,
+.dark .edu-longanswer[data-qv="v3"] .edu-title,
+.dark .edu-question[data-qv="v3"] .edu-title { border-bottom-color: rgba(255, 255, 255, 0.12); }
+
+/* v3 درست/نادرست — square buttons */
+.edu-truefalse[data-qv="v3"] .quiz-tf-btn { border-radius: 4px; font-weight: 700; }
+
+/* ── v4 «مینیمال» — borderless tinted rows ── */
+.edu-mcq[data-qv="v4"] .quiz-opt { box-shadow: none; background: transparent; border-radius: 8px; }
+.edu-mcq[data-qv="v4"] .quiz-opt[data-correct="true"] { background: rgba(22, 163, 74, 0.12); box-shadow: none; }
+.edu-mcq[data-qv="v4"] .quiz-opt-num { background: transparent; color: #0070f3; font-weight: 800; }
+.edu-mcq[data-qv="v4"] .quiz-opt[data-correct="true"] .quiz-opt-num { background: #16a34a; color: #fff; }
+.dark .edu-mcq[data-qv="v4"] .quiz-opt { background: rgba(255, 255, 255, 0.05); box-shadow: none; }
+.dark .edu-mcq[data-qv="v4"] .quiz-opt[data-correct="true"] { background: rgba(34, 197, 94, 0.16); }
+.dark .edu-mcq[data-qv="v4"] .quiz-opt-num { background: transparent; color: #6cb2ff; }
+.edu-truefalse[data-qv="v4"] .quiz-tf-btn { box-shadow: none; background: rgba(0, 0, 0, 0.035); }
+.edu-truefalse[data-qv="v4"] .quiz-tf-row[data-answer="true"] .quiz-tf-true,
+.edu-truefalse[data-qv="v4"] .quiz-tf-row[data-answer="false"] .quiz-tf-false { background: rgba(22, 163, 74, 0.14); color: #16a34a; font-weight: 700; }
+.dark .edu-truefalse[data-qv="v4"] .quiz-tf-btn { background: rgba(255, 255, 255, 0.05); }
+
+/* ── v5 «تیتر خط‌دار» — bold accent rule under the title, square chips ── */
+.edu-mcq[data-qv="v5"] .edu-title,
+.edu-truefalse[data-qv="v5"] .edu-title,
+.edu-longanswer[data-qv="v5"] .edu-title,
+.edu-question[data-qv="v5"] .edu-title {
+  border-bottom: 2px solid var(--q-accent, #0070f3);
+  padding-bottom: 6px;
+}
+.dark .edu-mcq[data-qv="v5"] .edu-title,
+.dark .edu-truefalse[data-qv="v5"] .edu-title,
+.dark .edu-longanswer[data-qv="v5"] .edu-title,
+.dark .edu-question[data-qv="v5"] .edu-title { border-bottom-color: #3291ff; }
+.edu-mcq[data-qv="v5"] .quiz-opt-num { border-radius: 4px; background: var(--q-accent, #0070f3); color: #fff; }
+.edu-mcq[data-qv="v5"] .quiz-opt[data-correct="true"] .quiz-opt-num { background: #16a34a; }
+.edu-mcq[data-qv="v5"] .quiz-opt[data-correct="true"] { box-shadow: inset 0 0 0 2px #16a34a; }
+
+/* ── v6 «کپسولی» — full pill rows and buttons ── */
+.edu-mcq[data-qv="v6"] .quiz-opt { border-radius: 999px; padding: 6px 14px; }
+.edu-mcq[data-qv="v6"] .quiz-opts-grid .quiz-opt { padding: 6px 14px; }
+.edu-mcq[data-qv="v6"] .quiz-opt-num { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--q-accent, #0070f3) 50%, transparent); background: transparent; color: var(--q-accent, #0070f3); font-weight: 800; }
+.edu-mcq[data-qv="v6"] .quiz-opt[data-correct="true"] .quiz-opt-num { background: #16a34a; box-shadow: none; color: #fff; }
+.dark .edu-mcq[data-qv="v6"] .quiz-opt-num { box-shadow: inset 0 0 0 1.5px rgba(50, 145, 255, 0.5); }
+.edu-truefalse[data-qv="v6"] .quiz-tf-btn { border-radius: 999px; padding: 6px 26px; }
+
+/* ── v7 «کنتراست» — dark plate question (highlight a key question) ── */
+.edu-mcq[data-qv="v7"],
+.edu-truefalse[data-qv="v7"],
+.edu-longanswer[data-qv="v7"],
+.edu-question[data-qv="v7"] {
+  background: #101a2e;
+  color: #e5edf8;
+  border-radius: 14px;
+  padding: 14px 16px 10px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+.edu-mcq[data-qv="v7"] .quiz-opt { background: rgba(255, 255, 255, 0.055); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+.edu-mcq[data-qv="v7"] .quiz-opt-text { color: #e5edf8; }
+.edu-mcq[data-qv="v7"] .quiz-opt-num { background: #3291ff; color: #fff; }
+.edu-mcq[data-qv="v7"] .quiz-opt[data-correct="true"] { background: rgba(34, 197, 94, 0.16); box-shadow: inset 0 0 0 1.5px #22c55e; }
+.edu-mcq[data-qv="v7"] .quiz-opt[data-correct="true"] .quiz-opt-num { background: #22c55e; color: #06280f; }
+.edu-mcq[data-qv="v7"] .quiz-end-answer,
+.edu-truefalse[data-qv="v7"] .quiz-end-answer { color: #4ade80; background: rgba(34, 197, 94, 0.14); }
+.edu-truefalse[data-qv="v7"] .quiz-tf-btn { background: rgba(255, 255, 255, 0.055); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); color: #e5edf8; }
+.edu-truefalse[data-qv="v7"] .quiz-tf-row[data-answer="true"] .quiz-tf-true,
+.edu-truefalse[data-qv="v7"] .quiz-tf-row[data-answer="false"] .quiz-tf-false { background: rgba(34, 197, 94, 0.2); box-shadow: inset 0 0 0 1.5px #22c55e; color: #86efac; }
+.dark .edu-mcq[data-qv="v7"],
+.dark .edu-truefalse[data-qv="v7"],
+.dark .edu-longanswer[data-qv="v7"],
+.dark .edu-question[data-qv="v7"] { background: #0c1424; }
+
+/* ── v8 «کلاسیک» — accent bar beside each option (RTL edge) ── */
+.edu-mcq[data-qv="v8"] .quiz-opt {
+  border-right: 3px solid color-mix(in srgb, var(--q-accent, #0070f3) 45%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  padding-right: 10px;
+}
+.edu-mcq[data-qv="v8"] .quiz-opt-num { background: transparent; color: var(--q-accent, #0070f3); font-weight: 800; }
+.edu-mcq[data-qv="v8"] .quiz-opt[data-correct="true"] { background: rgba(22, 163, 74, 0.07); border-right-color: #16a34a; }
+.edu-mcq[data-qv="v8"] .quiz-opt[data-correct="true"] .quiz-opt-num { background: transparent; color: #16a34a; }
+.dark .edu-mcq[data-qv="v8"] .quiz-opt { border-right-color: rgba(50, 145, 255, 0.45); }
+.dark .edu-mcq[data-qv="v8"] .quiz-opt[data-correct="true"] { border-right-color: #22c55e; }
+.dark .edu-mcq[data-qv="v8"] .quiz-opt-num { color: #6cb2ff; background: transparent; }
+.dark .edu-mcq[data-qv="v8"] .quiz-opt[data-correct="true"] .quiz-opt-num { color: #22c55e; }
+.edu-truefalse[data-qv="v8"] .quiz-tf-btn { border-right: 3px solid color-mix(in srgb, var(--q-accent, #0070f3) 45%, transparent); border-radius: 6px; }
+
+/* ── v9 «سری‌دار» — numbered exercise sheet: left rule + square badge ── */
+.edu-mcq[data-qv="v9"],
+.edu-truefalse[data-qv="v9"],
+.edu-longanswer[data-qv="v9"],
+.edu-question[data-qv="v9"] {
+  border-radius: 6px;
+  border-right-width: 3px;
+  border-right-color: var(--q-accent, #0070f3);
+}
+.edu-mcq[data-qv="v9"] .quiz-opt { background: rgba(0, 112, 243, 0.04); border-radius: 4px; box-shadow: none; }
+.edu-mcq[data-qv="v9"] .quiz-opt[data-correct="true"] { background: rgba(22, 163, 74, 0.1); box-shadow: inset 0 0 0 1.5px rgba(22, 163, 74, 0.55); }
+.edu-mcq[data-qv="v9"] .quiz-opt-num { background: var(--q-accent, #0070f3); color: #fff; border-radius: 4px; }
+.edu-mcq[data-qv="v9"] .quiz-opt[data-correct="true"] .quiz-opt-num { background: #16a34a; }
+.dark .edu-mcq[data-qv="v9"] .quiz-opt { background: rgba(255, 255, 255, 0.04); }
+
+/* ── v10 «شیشه‌ای ملایم» — soft tinted wash + hairline, no card ── */
+.edu-mcq[data-qv="v10"],
+.edu-truefalse[data-qv="v10"],
+.edu-longanswer[data-qv="v10"],
+.edu-question[data-qv="v10"] {
+  background: color-mix(in srgb, var(--q-accent, #0070f3) 6%, transparent);
+  border-radius: 12px;
+  box-shadow: none;
+}
+.edu-mcq[data-qv="v10"] .quiz-opt { background: transparent; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08); border-radius: 8px; }
+.edu-mcq[data-qv="v10"] .quiz-opt[data-correct="true"] { box-shadow: inset 0 0 0 2px #16a34a; background: rgba(22, 163, 74, 0.06); }
+.edu-mcq[data-qv="v10"] .quiz-opt-num { background: transparent; color: var(--q-accent, #0070f3); font-weight: 800; }
+.edu-mcq[data-qv="v10"] .quiz-opt[data-correct="true"] .quiz-opt-num { color: #16a34a; }
+.dark .edu-mcq[data-qv="v10"] .quiz-opt { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); }
+
+/* ── v11 «دفتر امتحان» — dotted leaders between chips and text ── */
+.edu-mcq[data-qv="v11"] .quiz-opt { background: transparent; box-shadow: none; border-radius: 0; padding: 5px 2px; border-bottom: 1px dotted rgba(0, 0, 0, 0.18); }
+.edu-mcq[data-qv="v11"] .quiz-opts-grid .quiz-opt { border-bottom: none; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1); border-radius: 6px; }
+.edu-mcq[data-qv="v11"] .quiz-opt-num { background: transparent; color: inherit; font-weight: 700; }
+.edu-mcq[data-qv="v11"] .quiz-opt[data-correct="true"] { background: rgba(22, 163, 74, 0.05); box-shadow: none; border-bottom-color: rgba(22, 163, 74, 0.5); }
+.dark .edu-mcq[data-qv="v11"] .quiz-opt { border-bottom-color: rgba(255, 255, 255, 0.14); }
+.edu-truefalse[data-qv="v11"] .quiz-tf-btn { background: transparent; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12); }
+
+/* ── v12 «چاپخانه» — print-shop: heavy top rule, mono chips, tight rows ── */
+.edu-mcq[data-qv="v12"],
+.edu-truefalse[data-qv="v12"],
+.edu-longanswer[data-qv="v12"],
+.edu-question[data-qv="v12"] {
+  border-top: 3px solid var(--q-accent, #171717);
+  border-radius: 0;
+}
+.edu-mcq[data-qv="v12"] .edu-title { letter-spacing: 0.01em; }
+.edu-mcq[data-qv="v12"] .quiz-opt { background: transparent; box-shadow: none; border-radius: 0; padding: 4px 6px; }
+.edu-mcq[data-qv="v12"] .quiz-opt-num { background: transparent; color: var(--q-accent, #171717); font-weight: 800; border-radius: 2px; }
+.edu-mcq[data-qv="v12"] .quiz-opt[data-correct="true"] { background: rgba(22, 163, 74, 0.06); box-shadow: inset 0 0 0 1.5px rgba(22, 163, 74, 0.5); }
+.edu-mcq[data-qv="v12"] .quiz-opt[data-correct="true"] .quiz-opt-num { color: #16a34a; }
+.dark .edu-mcq[data-qv="v12"] .quiz-opt-num { color: var(--q-accent, #6cb2ff); }
+
+/* ── per-block option tuning (data-chip / data-gap / --q-accent) ── */
+.edu-mcq[data-chip="square"] .quiz-opt-num,
+.edu-truefalse[data-chip="square"] .quiz-tf-btn { border-radius: 4px; }
+.edu-mcq[data-chip="none"] .quiz-opt-num { background: transparent; box-shadow: inset 0 0 0 1.5px rgba(0, 0, 0, 0.18); color: inherit; }
+.dark .edu-mcq[data-chip="none"] .quiz-opt-num { box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.2); }
+.edu-mcq[data-gap="tight"] .quiz-opt { margin-bottom: 2px; padding-top: 3px; padding-bottom: 3px; }
+.edu-mcq[data-gap="wide"] .quiz-opt { margin-bottom: 12px; }
+.edu-mcq[data-gap="tight"] .quiz-opts-grid { gap: 2px 6px; }
+.edu-mcq[data-gap="wide"] .quiz-opts-grid { gap: 12px 6px; }
+
+/* ── variant samples (template pickers) — mini MCQ per data-qv ── */
+.vsample {
+  display: inline-flex; flex-direction: column; gap: 2px;
+  width: 54px; height: 34px; flex: none;
+  padding: 4px 5px; box-sizing: border-box;
+  border: 1px solid rgba(0, 0, 0, 0.16); border-radius: 4px;
+  background: #fff;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact;
+}
+.dark .vsample { background: #1a1a1a; border-color: rgba(255, 255, 255, 0.16); }
+.vsample-title { height: 4px; width: 70%; border-radius: 2px; background: rgba(0, 0, 0, 0.28); margin-bottom: 1px; flex: none; }
+.dark .vsample-title { background: rgba(255, 255, 255, 0.3); }
+.vsample-row { display: flex; align-items: center; gap: 2px; flex: none; }
+.vsample-num { width: 6px; height: 6px; border-radius: 50%; background: rgba(0, 112, 243, 0.55); flex: none; }
+.vsample-line { height: 3px; border-radius: 2px; background: rgba(0, 0, 0, 0.12); flex: 1; }
+.dark .vsample-line { background: rgba(255, 255, 255, 0.14); }
+.vsample-line.w1 { width: 60%; flex: none; }
+.vsample-line.w2 { width: 80%; flex: none; }
+
+/* per-variant sample skins — mirror the real variant rules */
+.vsample[data-qv="v2"] { border-radius: 6px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
+.vsample[data-qv="v2"] .vsample-row { background: #f4f4f5; border-radius: 3px; padding: 1px 2px; }
+.vsample[data-qv="v3"] .vsample-row { background: transparent; border-bottom: 1px dashed rgba(0, 0, 0, 0.2); border-radius: 0; }
+.vsample[data-qv="v3"] .vsample-num { border-radius: 1px; background: transparent; box-shadow: inset 0 0 0 1px rgba(0, 112, 243, 0.5); }
+.vsample[data-qv="v4"] { border-color: transparent; background: transparent; }
+.vsample[data-qv="v4"] .vsample-row { background: rgba(0, 0, 0, 0.045); border-radius: 3px; }
+.vsample[data-qv="v5"] { border-color: transparent; border-bottom: 2px solid #0070f3; border-radius: 2px; }
+.vsample[data-qv="v5"] .vsample-num { border-radius: 1px; background: #0070f3; }
+.vsample[data-qv="v6"] { border-radius: 10px; }
+.vsample[data-qv="v6"] .vsample-row { border-radius: 5px; box-shadow: inset 0 0 0 1px rgba(0, 112, 243, 0.35); }
+.vsample[data-qv="v7"] { background: #101a2e; border-color: transparent; }
+.vsample[data-qv="v7"] .vsample-title { background: rgba(255, 255, 255, 0.35); }
+.vsample[data-qv="v7"] .vsample-row { background: rgba(255, 255, 255, 0.08); border-radius: 2px; }
+.vsample[data-qv="v7"] .vsample-num { background: #3291ff; }
+.vsample[data-qv="v7"] .vsample-line { background: rgba(255, 255, 255, 0.18); }
+.vsample[data-qv="v8"] { border-color: transparent; }
+.vsample[data-qv="v8"] .vsample-row { border-right: 2px solid rgba(0, 112, 243, 0.45); border-radius: 1px; }
+.vsample[data-qv="v9"] { border-right: 2px solid #0070f3; border-radius: 2px; }
+.vsample[data-qv="v9"] .vsample-num { border-radius: 1px; background: #0070f3; }
+.vsample[data-qv="v9"] .vsample-row { background: rgba(0, 112, 243, 0.05); border-radius: 2px; }
+.vsample[data-qv="v10"] { background: rgba(0, 112, 243, 0.07); border-color: transparent; border-radius: 6px; }
+.vsample[data-qv="v10"] .vsample-row { box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1); border-radius: 3px; background: transparent; }
+.vsample[data-qv="v11"] .vsample-row { background: transparent; border-bottom: 1px dotted rgba(0, 0, 0, 0.25); border-radius: 0; }
+.vsample[data-qv="v12"] { border-top: 2px solid #171717; border-radius: 0; }
+.vsample[data-qv="v12"] .vsample-num { border-radius: 1px; background: transparent; color: inherit; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.3); }
+.dark .vsample[data-qv="v3"] .vsample-num { box-shadow: inset 0 0 0 1px rgba(50, 145, 255, 0.6); }
+.dark .vsample[data-qv="v7"] { background: #0c1424; }
+.dark .vsample[data-qv="v8"] .vsample-row { border-right-color: rgba(50, 145, 255, 0.5); }
+.dark .vsample[data-qv="v9"] { border-right-color: #3291ff; }
+.dark .vsample[data-qv="v9"] .vsample-num { background: #3291ff; }
+.dark .vsample[data-qv="v10"] { background: rgba(50, 145, 255, 0.1); }
+.dark .vsample[data-qv="v12"] { border-top-color: #e5edf8; }
+
+/* ── answer slots & lines (shared across families) ──
+   .quiz-end-answer — the END answer line (answerAt='end'): small, muted,
+   placed AFTER the question flow so practice sheets aren't spoiled. */
+.quiz-end-answer {
+  margin-top: 6px;
+  padding: 4px 10px;
+  font-size: 0.82em;
+  font-weight: 600;
+  color: #16a34a;
+  background: rgba(22, 163, 74, 0.07);
+  border-radius: 6px;
+  width: fit-content;
+  max-width: 100%;
+}
+.dark .quiz-end-answer { color: #4ade80; background: rgba(34, 197, 94, 0.12); }
+/* ruled answer sheet for تشریحی v2/v3 — writing lines under the question */
+.edu-longanswer[data-qv="v2"] .edu-body > p,
+.edu-longanswer[data-qv="v3"] .edu-body > p {
+  background-image: repeating-linear-gradient(transparent 0, transparent 27px, rgba(0, 0, 0, 0.08) 27px, rgba(0, 0, 0, 0.08) 28px);
+  line-height: 28px;
+}
+.dark .edu-longanswer[data-qv="v2"] .edu-body > p,
+.dark .edu-longanswer[data-qv="v3"] .edu-body > p {
+  background-image: repeating-linear-gradient(transparent 0, transparent 27px, rgba(255, 255, 255, 0.1) 27px, rgba(255, 255, 255, 0.1) 28px);
+}
+.quiz-opt-del {
+  flex: none;
+  width: 1.2em;
+  height: 1.2em;
+  border: none;
+  background: transparent;
+  color: #a1a1aa;
+  font-size: 0.95em;
+  line-height: 1;
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s, color 0.1s, background 0.1s;
+}
+.quiz-opt:hover .quiz-opt-del { opacity: 1; }
+.quiz-opt-del:hover { color: #dc2626; background: rgba(220, 38, 38, 0.08); }
+.quiz-layout-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+  margin-bottom: 6px;
+}
+.quiz-layout-btn {
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  background: transparent;
+  color: #64748b;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.quiz-layout-btn:hover { background: rgba(0, 0, 0, 0.04); }
+.quiz-layout-btn[aria-pressed="true"] {
+  border-color: #0070f3;
+  background: rgba(0, 112, 243, 0.08);
+  color: #0070f3;
+  font-weight: 700;
+}
+.dark .quiz-opt { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.02); }
+.dark .quiz-opt-num { background: rgba(50, 145, 255, 0.16); color: #3291ff; }
+.dark .quiz-opt[data-correct="true"] .quiz-opt-num { background: #22c55e; color: #06280f; }
+.dark .quiz-layout-btn { border-color: rgba(255, 255, 255, 0.14); color: #94a3b8; }
+.dark .quiz-layout-btn[aria-pressed="true"] { border-color: #3291ff; background: rgba(50, 145, 255, 0.14); color: #6cb2ff; }
+.dark .quiz-opt[data-correct="true"] { background: rgba(34, 197, 94, 0.1); box-shadow: inset 0 0 0 1.5px rgba(34, 197, 94, 0.5); }
+
+/* درست / نادرست — two flat buttons, answer highlighted */
+.quiz-tf-row { display: flex; gap: 8px; margin: 2px 0 8px; }
+.quiz-tf-btn {
+  flex: none;
+  min-width: 88px;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  border-radius: 8px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 0.85em;
+  font-weight: 600;
+  padding: 5px 16px;
+  cursor: pointer;
+  color: #64748b;
+  user-select: none;
+  transition: background 0.12s, color 0.12s, border-color 0.12s, box-shadow 0.12s;
+}
+.quiz-tf-true:hover { color: #16a34a; border-color: rgba(22, 163, 74, 0.5); background: rgba(22, 163, 74, 0.06); }
+.quiz-tf-false:hover { color: #dc2626; border-color: rgba(220, 38, 38, 0.5); background: rgba(220, 38, 38, 0.05); }
+.quiz-tf-row[data-answer="true"] .quiz-tf-true {
+  background: rgba(22, 163, 74, 0.12);
+  border-color: #16a34a;
+  color: #15803d;
+  box-shadow: inset 0 0 0 1px rgba(22, 163, 74, 0.35);
+}
+.quiz-tf-row[data-answer="false"] .quiz-tf-false {
+  background: rgba(220, 38, 38, 0.1);
+  border-color: #dc2626;
+  color: #b91c1c;
+  box-shadow: inset 0 0 0 1px rgba(220, 38, 38, 0.35);
+}
+.dark .quiz-tf-btn { border-color: rgba(255, 255, 255, 0.14); color: #94a3b8; }
+.dark .quiz-tf-row[data-answer="true"] .quiz-tf-true { background: rgba(34, 197, 94, 0.14); border-color: #22c55e; color: #4ade80; }
+.dark .quiz-tf-row[data-answer="false"] .quiz-tf-false { background: rgba(239, 68, 68, 0.14); border-color: #ef4444; color: #f87171; }
+
+/* Dark mode blocks */
+.dark .edu-block {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+.dark .edu-definition .edu-title { color: #3291ff; }
+.dark .edu-important .edu-title { color: #f5a623; }
+.dark .edu-exam .edu-title { color: #74b2c7; }
+.dark .edu-warning .edu-title { color: #ff5b4f; }
+.dark .edu-summary .edu-title { color: #3291ff; }
+.dark .edu-question .edu-title { color: #a855f7; }
+.dark .edu-example .edu-title { color: #74b2c7; }
+.dark .edu-keyterm .edu-title { color: #a855f7; }
+.dark .edu-answer { color: #999; border-color: rgba(255, 255, 255, 0.08); }
+.dark .edu-highlight .edu-title { color: #f5a623; }
+.dark .edu-reference .edu-title { color: #a855f7; }
+.dark .edu-truefalse .edu-title { color: #74b2c7; }
+.dark .edu-mcq .edu-title { color: #a855f7; }
+.dark .edu-procon .edu-title { color: #3291ff; }
+.dark .edu-codeoutput .edu-title { color: #3291ff; }
+
+/* ── customization: «رنگی» box style (user setting) ─────────────
+   Restores the tinted backgrounds on top of the minimal defaults.
+   Scope: any ancestor with .edu-tinted (set from the Ribbon). */
+.edu-tinted .edu-definition { background: rgba(0, 112, 243, 0.04); }
+.edu-tinted .edu-important { background: rgba(245, 166, 35, 0.06); }
+.edu-tinted .edu-exam { background: rgba(31, 115, 150, 0.06); }
+.edu-tinted .edu-warning { background: rgba(239, 68, 68, 0.05); }
+.edu-tinted .edu-summary { background: rgba(0, 112, 243, 0.04); }
+.edu-tinted .edu-question { background: rgba(121, 40, 202, 0.05); }
+.edu-tinted .edu-example { background: rgba(31, 115, 150, 0.05); }
+.edu-tinted .edu-keyterm { background: rgba(121, 40, 202, 0.05); }
+.edu-tinted .edu-formula { background: rgba(0, 112, 243, 0.03); }
+.edu-tinted .edu-highlight { background: rgba(245, 166, 35, 0.06); }
+.edu-tinted .edu-reference { background: rgba(121, 40, 202, 0.04); }
+.edu-tinted .edu-procon { background: rgba(0, 112, 243, 0.03); }
+.edu-tinted .edu-codeoutput { background: rgba(0, 112, 243, 0.03); }
+.edu-tinted .edu-comparison { background: rgba(121, 40, 202, 0.04); }
+.edu-tinted .edu-timeline { background: rgba(0, 112, 243, 0.04); }
+.edu-tinted .edu-footnote { background: rgba(31, 115, 150, 0.04); }
+.edu-tinted .edu-longanswer { background: rgba(245, 166, 35, 0.05); }
+.edu-tinted .edu-truefalse { background: rgba(31, 115, 150, 0.05); }
+.edu-tinted .edu-mcq { background: rgba(121, 40, 202, 0.04); }
+.dark .edu-tinted .edu-definition { background: rgba(0, 112, 243, 0.08); }
+.dark .edu-tinted .edu-important { background: rgba(245, 166, 35, 0.08); }
+.dark .edu-tinted .edu-exam { background: rgba(31, 115, 150, 0.08); }
+.dark .edu-tinted .edu-warning { background: rgba(239, 68, 68, 0.08); }
+.dark .edu-tinted .edu-summary { background: rgba(0, 112, 243, 0.08); }
+.dark .edu-tinted .edu-question { background: rgba(121, 40, 202, 0.08); }
+.dark .edu-tinted .edu-example { background: rgba(31, 115, 150, 0.08); }
+.dark .edu-tinted .edu-keyterm { background: rgba(121, 40, 202, 0.08); }
+.dark .edu-tinted .edu-formula { background: rgba(0, 112, 243, 0.06); }
+.dark .edu-tinted .edu-highlight { background: rgba(245, 166, 35, 0.08); }
+.dark .edu-tinted .edu-reference { background: rgba(121, 40, 202, 0.06); }
+.dark .edu-tinted .edu-procon { background: rgba(0, 112, 243, 0.06); }
+.dark .edu-tinted .edu-codeoutput { background: rgba(0, 112, 243, 0.06); }
+.dark .edu-tinted .edu-comparison { background: rgba(121, 40, 202, 0.06); }
+.dark .edu-tinted .edu-timeline { background: rgba(0, 112, 243, 0.06); }
+.dark .edu-tinted .edu-footnote { background: rgba(31, 115, 150, 0.06); }
+.dark .edu-tinted .edu-longanswer { background: rgba(245, 166, 35, 0.06); }
+.dark .edu-tinted .edu-truefalse { background: rgba(31, 115, 150, 0.07); }
+.dark .edu-tinted .edu-mcq { background: rgba(121, 40, 202, 0.06); }
+
+/* Comparison */
+.cmp-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(121, 40, 202, 0.06);
+  border-radius: 8px 8px 0 0;
+}
+.dark .cmp-head { background: rgba(121, 40, 202, 0.1); }
+.cmp-label { flex: 1; font-weight: 600; font-size: 0.88em; color: #7928ca; }
+.dark .cmp-label { color: #a855f7; }
+.cmp-vs { color: #7928ca; font-weight: 600; letter-spacing: 0.02em; font-size: 0.82em; }
+.cmp-body { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.cmp-body td {
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  padding: 8px 10px;
+  font-size: 0.9em;
+  vertical-align: top;
+}
+.dark .cmp-body td { border-color: rgba(255, 255, 255, 0.06); }
+.cmp-row-label { font-weight: 600; color: #666; background: rgba(0, 0, 0, 0.02); width: 35%; }
+.dark .cmp-row-label { background: rgba(255, 255, 255, 0.03); color: #999; }
+.cmp-row-cell { color: #333; }
+.dark .cmp-row-cell { color: #ccc; }
+
+/* Timeline */
+.edu-timeline .edu-title { color: #0070f3; box-shadow: inset 0 -1px 0 0 rgba(0, 112, 243, 0.1); padding-bottom: 6px; margin-bottom: 8px; }
+.dark .edu-timeline .edu-title { color: #3291ff; box-shadow: inset 0 -1px 0 0 rgba(0, 112, 243, 0.15); }
+.timeline-item {
+  display: flex;
+  gap: 12px;
+  padding: 6px 4px;
+  box-shadow: inset 3px 0 0 0 #0070f3;
+  margin-left: 8px;
+  padding-left: 12px;
+}
+.timeline-item + .timeline-item { margin-top: 2px; }
+.dark .timeline-item { box-shadow: inset 3px 0 0 0 #3291ff; }
+
+/* Footnote */
+.edu-footnote {
+  border-style: dashed;
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin: 6px 0;
+}
+.edu-footnote .edu-title { font-size: 0.85em; color: #175e7d; margin-bottom: 2px; }
+.dark .edu-footnote .edu-title { color: #74b2c7; }
+
+/* Long Answer */
+.edu-longanswer .edu-title { color: #b45309; box-shadow: inset 0 -1px 0 0 rgba(245, 166, 35, 0.2); padding-bottom: 4px; }
+.dark .edu-longanswer .edu-title { color: #f5a623; }
+
+.edu-term-input,
+.edu-input {
+  background: transparent;
+  border: none;
+  border-bottom: 1px dashed rgba(0, 0, 0, 0.15);
+  font-weight: 600;
+  outline: none;
+  width: 100%;
+  font-family: inherit;
+  color: inherit;
+}
+.edu-block .katex-display { margin: 0.3em 0; }
+.edu-katex-src, .edu-latex-src { direction: ltr; }
+
+/* ================================================================
+   Slash menu
+   ================================================================ */
+.slash-menu {
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(44px) saturate(190%);
+  -webkit-backdrop-filter: blur(44px) saturate(190%);
+  border-radius: 12px;
+  overflow: hidden;
+  max-height: 360px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.08),
+    0 4px 8px rgba(0, 0, 0, 0.04),
+    0 16px 48px rgba(0, 0, 0, 0.08);
+  padding: 4px;
+  animation: pn-scale-in 0.1s ease-out;
+}
+.dark .slash-menu {
+  background: rgba(28, 32, 36, 0.58);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 16px 48px rgba(0, 0, 0, 0.4);
+}
+.slash-group-label {
+  padding: 8px 12px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #999;
+}
+.slash-item-title { flex: 1; }
+.slash-item {
+  cursor: pointer;
+}
+.slash-item[data-selected='true'] {
+  background: rgba(0, 0, 0, 0.04);
+}
+.dark .slash-item[data-selected='true'] {
+  background: rgba(255, 255, 255, 0.06);
+}
+.slash-item-inner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.slash-item-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: #f4f4f5;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+.slash-item-icon svg {
+  width: 20px;
+  height: 20px;
+  color: #555;
+}
+.dark .slash-item-icon { background: #2a2a2a; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 1px 2px rgba(0, 0, 0, 0.2); }
+.dark .slash-item-icon svg { color: #ccc; }
+.slash-item-title {
+  flex: 1;
+  line-height: 1.3;
+  word-break: break-word;
+  font-size: 13px;
+  font-weight: 500;
+  color: #171717;
+}
+.dark .slash-item-title { color: #eee; }
+
+/* ================================================================
+   Find & Replace
+   ================================================================ */
+.pn-find-highlight {
+  background: rgba(0, 112, 243, 0.12);
+  border-radius: 2px;
+}
+.pn-find-highlight[data-current='true'] {
+  background: rgba(0, 112, 243, 0.25);
+  box-shadow: 0 0 0 1px rgba(0, 112, 243, 0.3);
+}
+
+/* ================================================================
+   Focus mode
+   ================================================================ */
+/* hide distraction panels (AI sidebar, …) — but NOT the pages sidebar:
+   its collapsed rail must stay reachable so page previews can still be
+   opened while in focus mode (toggling it open/closed keeps working). */
+.pn-focus-mode aside:not(.pn-pages-rail):not(.pn-pages-sidebar) { display: none !important; }
+.pn-focus-mode .pn-focusable {
+  opacity: 0.12;
+  transition: opacity 0.2s ease;
+}
+.pn-focus-mode .pn-focusable:hover {
+  opacity: 1;
+}
+
+/* ================================================================
+   A4 Page System — Word-like visual pages (multi-page)
+   ================================================================
+   Architecture:
+     .pn-editor-scroll = gray "desktop" background, scrollable
+     .document-pages = flex column, centered, gap between A4 pages
+       .page-paper = white A4 paper with shadow (one per page)
+         .page-border = ornamental A4 border per page
+         .page-content = independent TipTap editor per page
+
+   Each page is a sibling of the previous one. Pages are stacked
+   vertically in normal flow — no absolute positioning.
+   ================================================================ */
+
+/* Gray scroll area — the "desktop" behind the pages */
+.pn-editor-scroll {
+  background: #ecf1f7;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* `safe` keeps the A4 sheet edge reachable when it overflows a narrow
+     viewport; plain center would clip the start side of the sheet. */
+  align-items: safe center;
+}
+.dark .pn-editor-scroll {
+  background: #1a1a1a;
+}
+
+/* Document pages container — vertical stack of independent A4 pages */
+.document-pages {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  width: 100%;
+}
+
+/* Paper container — the white A4 page with shadow (one per page).
+   EXACTLY one A4 sheet (794x1123 CSS px at 96dpi, border-box): a fixed
+   height keeps every page identical — a page must never grow because its
+   content is long (use «صفحه جدید» to add a real page instead).
+   overflow:hidden clips at the sheet edge, like a physical page would.
+
+   The A4 sheet IS the editing canvas: padding is only the small writing-safe
+   margin (≈5mm inside the framed border / ≈10mm blank & notebook), NOT a
+   decorative inset. The ornamental frame (PageBorder) hugs the sheet edge,
+   so the editable area reaches almost to the border — no small inner box. */
+.page-paper {
+  width: 794px;
+  min-width: 794px;
+  height: 1123px;
+  background: #fff;
+  /* BUG-1 fix: the sheet's own color as a CSS variable so tables and float
+     surfaces can match it without hardcoding per-kind colors */
+  --page-surface: #ffffff;
+  /* ≈5mm inside the ornamental frame's inner edge (frame hugs the sheet at
+     ≈3mm): content extends up to the border plus a small safe margin */
+  padding: 30px 32px;
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.08),
+    0 4px 12px rgba(0, 0, 0, 0.06),
+    0 12px 36px rgba(0, 0, 0, 0.04);
+  position: relative;
+  overflow: hidden;
+  margin-top: 14px;
+  margin-bottom: 14px;
+}
+.page-paper:first-child {
+  margin-top: 14px;
+}
+.page-paper:last-child {
+  margin-bottom: 0;
+}
+.dark .page-paper {
+  background: #171717;
+  --page-surface: #171717;
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.2),
+    0 4px 12px rgba(0, 0, 0, 0.15),
+    0 12px 36px rgba(0, 0, 0, 0.1);
+}
+
+/* Per-page ornamental border */
+.page-border {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+  overflow: hidden;
+}
+
+/* ── Blank page (صفحه بلنک، بدون قاب) ──────────────────────────────
+   Clean sheet: no ornamental frame, so the writing area extends to the
+   A4 sheet edges — only a small ≈10mm writing-safe margin is kept. */
+.page-blank {
+  padding: 38px 38px;
+}
+
+/* ── Notebook page (صفحه نوت‌بوکی، خط‌دار) ─────────────────────────
+   Ruled sheet like real notebook paper: blue lines that repeat with the
+   editor's line rhythm (--editor-font-size × --editor-line-height) and a
+   red margin line, drawn edge-to-edge across the full A4 sheet.
+   Same ≈10mm safe margin as the blank sheet. */
+.page-notebook {
+  padding: 38px 38px;
+}
+.page-notebook-lines {
+  --nb-line: calc(var(--editor-font-size, 16px) * var(--editor-line-height, 2));
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background-image:
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent calc(var(--nb-line) - 1px),
+      var(--nb-line-color, rgba(37, 99, 235, 0.18)) calc(var(--nb-line) - 1px),
+      var(--nb-line-color, rgba(37, 99, 235, 0.18)) var(--nb-line)
+    ),
+    linear-gradient(
+      to left,
+      transparent 0,
+      transparent 28px,
+      var(--nb-margin-color, rgba(225, 29, 72, 0.2)) 28px,
+      var(--nb-margin-color, rgba(225, 29, 72, 0.2)) calc(28px + 1px),
+      transparent calc(28px + 1px)
+    );
+}
+.dark .page-notebook-lines {
+  --nb-line-color: rgba(147, 197, 253, 0.14);
+  --nb-margin-color: rgba(251, 113, 133, 0.18);
+}
+
+/* Page content — independent editable area per page.
+   Fills the sheet's inner box (sheet minus the small safe-margin padding)
+   exactly; content that exceeds it is clipped by the sheet, never stretched. */
+.page-content {
+  position: relative;
+  z-index: 3;
+  height: 100%;
+}
+
+/* The editor fills the page's usable area — width AND height — so the user
+   types directly on the A4 sheet instead of inside a small inner box.
+   min-height (not fixed height) keeps click targets correct when content
+   overflows the sheet. */
+.page-content .pn-editor-wrap {
+  height: 100%;
+}
+.page-content .pn-editor-wrap .ProseMirror {
+  min-height: 100%;
+}
+
+/* Print: hide the interactive border, print export uses its own SVG */
+@media print {
+  .page-border {
+    display: none !important;
+  }
+  /* The floating-layer decorations (drag handles, outlines, "new" badge,
+     properties toolbar) are editor-only. The print preview/PDF re-renders
+     the actual shapes/text from floatingElementsHtml, so this layer must
+     never be printed. */
+  .pn-float-layer {
+    display: none !important;
+  }
+  /* Print each .page-paper as a separate A4 page */
+  .document-pages {
+    display: block;
+  }
+  .page-paper {
+    box-shadow: none !important;
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+    page-break-after: always;
+    break-after: page;
+  }
+  .page-paper:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+}
+
+/* Legacy hr styling */
+.ProseMirror hr {
+  border: none;
+  border-top: 1px dashed rgba(0,0,0,0.12);
+  margin: 16px 0;
+}
+.dark .ProseMirror hr {
+  border-color: rgba(255,255,255,0.08);
+}
+
+/* ================================================================
+   Keyboard shortcut key
+   ================================================================ */
+.pn-shortcut-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 5px;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: 'Geist Mono', 'SF Mono', Consolas, monospace;
+  background: #fafafa;
+  border-radius: 4px;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.08),
+    0 1px 2px rgba(0, 0, 0, 0.04);
+  color: #666;
+}
+.dark .pn-shortcut-key {
+  background: #1a1a1a;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+  color: #999;
+}
+
+/* ================================================================
+   Scrollbar — minimal, only useful
+   ================================================================ */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.12); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.2); }
+.dark ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); }
+.dark ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
+html { scrollbar-width: thin; scrollbar-color: rgba(0, 0, 0, 0.12) transparent; }
+.dark html { scrollbar-color: rgba(255, 255, 255, 0.12) transparent; }
+
+/* ================================================================
+   Print — real A4 pages
+   ================================================================ */
+@media print {
+  .pn-focusable { display: none !important; }
+  .pn-editor-scroll { background: white !important; padding: 0 !important; }
+  .pn-paper {
+    box-shadow: none !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    min-height: 0 !important;
+    background: white !important;
+    padding: 96px 80px !important;
+  }
+  /* PageBreak node → page break in print */
+  .ProseMirror .pn-page-break {
+    display: block !important;
+    page-break-after: always;
+    break-after: page;
+    padding: 0 !important;
+    margin: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+  }
+  .pn-page-break::before,
+  .pn-page-break-label {
+    display: none !important;
+  }
+  .ProseMirror hr {
+    border: none !important;
+    border-top: 0.5px solid #ccc !important;
+    margin: 8px 0 !important;
+  }
+  @page {
+    size: A4;
+    margin: 0;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   Structured equation editor (mq-*) — professional math layout.
+   Math is ALWAYS LTR, even inside the RTL Persian document: the equation
+   root carries dir="ltr". Italic variables, upright numbers/operators,
+   real stacked fractions, radicals, limits, em-based matrix grid.
+   ════════════════════════════════════════════════════════════════════ */
+
+.mq-equation {
+  display: block;
+  direction: ltr;
+  text-align: center;
+  margin: 0.45em 0;
+  padding: 2px 4px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  line-height: 1.4;
+  font-family: 'Cambria Math', 'STIX Two Math', 'Latin Modern Math', 'Times New Roman', serif;
+  font-size: 1.06em;
+  user-select: none;
+  cursor: default;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+.mq-equation.mq-equation-inline {
+  display: inline-block;
+  margin: 0 0.2em;
+  vertical-align: middle;
+}
+.mq-equation.mq-align-left { text-align: left; }
+.mq-equation.mq-align-right { text-align: right; }
+/* no explicit align → follow the paragraph's text-align (item 15) */
+.mq-equation.mq-align-inherit { text-align: inherit; }
+/* CHROMELESS: a formula is part of the text — no permanent background or
+   border. Affordance appears only on hover, and the focus ring only while
+   the caret is inside. Zero layout shift either way. */
+.mq-equation:not(.mq-editing):hover {
+  border-color: rgba(124, 176, 224, 0.3);
+  background: rgba(124, 176, 224, 0.035);
+}
+.mq-equation.mq-editing {
+  border-color: rgba(124, 176, 224, 0.55);
+  background: rgba(124, 176, 224, 0.05);
+  box-shadow: 0 0 0 3px rgba(124, 176, 224, 0.1);
+}
+.dark .mq-equation.mq-editing {
+  border-color: rgba(124, 176, 224, 0.45);
+  background: rgba(124, 176, 224, 0.07);
+  box-shadow: 0 0 0 3px rgba(124, 176, 224, 0.09);
+}
+/* node-level hover (structure under cursor) only while editing */
+.mq-editing [data-node]:hover { background: rgba(124, 176, 224, 0.08); border-radius: 3px; }
+.mq-surface { display: inline-block; direction: ltr; }
+.mq-root { display: inline; direction: ltr; unicode-bidi: isolate; white-space: nowrap; }
+
+/* atoms */
+.mq-var { font-style: italic; padding: 0 0.02em; }
+.mq-op { font-style: normal; padding: 0 0.08em; }
+.mq-rel { font-style: normal; padding: 0 0.22em; }
+
+/* placeholder box — steady, softly inviting (pulsing while typing was noise) */
+.mq-ph {
+  color: rgba(120, 130, 150, 0.8);
+  opacity: 0.85;
+  padding: 0 0.1em;
+}
+@keyframes mq-ph-pulse { 0%, 100% { opacity: 0.85; } 50% { opacity: 0.55; } }
+.mq-editing .mq-ph { transition: color 0.15s ease; }
+.mq-editing .mq-ph:hover { color: rgba(47, 111, 208, 0.75); }
+
+/* empty slot: an invisible caret target so clicks always land somewhere */
+.mq-list-empty {
+  display: inline-block;
+  min-width: 1.1em;
+  min-height: 1.5em;
+  vertical-align: middle;
+  position: relative;
+}
+.mq-list-empty::after {
+  content: '';
+  position: absolute;
+  inset: 0.1em 0.05em;
+  border: 1px dashed rgba(124, 176, 224, 0.35);
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.mq-editing .mq-list-empty::after { opacity: 1; }
+.mq-editing .mq-list-empty:hover::after { border-color: rgba(124, 176, 224, 0.7); }
+
+/* caret — steady while typing (no blink restart), blinks at rest */
+.mq-caret {
+  display: inline-block;
+  width: 0;
+  height: 1.15em;
+  border-left: 2px solid #2f6fd0;
+  margin: 0 -1px;
+  vertical-align: text-bottom;
+  animation: mq-caret-blink 1.05s steps(1) infinite;
+}
+@keyframes mq-caret-blink { 50% { border-color: transparent; } }
+.mq-typing .mq-caret { animation: none; }
+/* whole-equation selection ghost (Ctrl+A) */
+.mq-selected-all > .mq-root { background: rgba(124, 176, 224, 0.18); border-radius: 4px; }
+
+/* first-use hint bar — the teaching moment under a fresh empty formula */
+.mq-hints {
+  display: none;
+  margin-top: 4px;
+  font-family: inherit;
+  font-size: 10.5px;
+  line-height: 1.7;
+  color: rgba(100, 116, 139, 0.95);
+  text-align: center;
+}
+.mq-hints code {
+  direction: ltr;
+  unicode-bidi: isolate;
+  display: inline-block;
+  font-family: Consolas, monospace;
+  font-size: 10px;
+  background: rgba(148, 163, 184, 0.16);
+  border-radius: 3px;
+  padding: 0 4px;
+  margin: 0 1px;
+  color: #475569;
+}
+.dark .mq-hints { color: rgba(148, 163, 184, 0.8); }
+.dark .mq-hints code { background: rgba(148, 163, 184, 0.14); color: #cbd5e1; }
+.mq-hints.mq-show { display: block; }
+
+/* while typing, the box hints interactivity with a text cursor */
+.mq-typing { cursor: text; }
+
+/* fraction */
+.mq-frac {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  vertical-align: -0.55em;
+  margin: 0 0.15em;
+}
+.mq-frac-num, .mq-frac-den { display: block; padding: 0 0.25em; text-align: center; }
+.mq-frac-num { border-bottom: 1.2px solid currentColor; }
+
+/* scripts */
+.mq-script { display: inline-block; white-space: nowrap; }
+/* superscript must sit clearly ABOVE the baseline (item: بالانویس دقیقا بالانویس
+   باشد) — vertical-align:super rides too low at small sizes, so lift it with a
+   relative offset like real math typesetting (KaTeX uses ~0.45em) */
+.mq-sup { font-size: 0.72em; vertical-align: super; position: relative; top: -0.38em; line-height: 0; padding-left: 0.05em; }
+.mq-sub { font-size: 0.72em; vertical-align: sub; position: relative; top: 0.12em; line-height: 0; padding-left: 0.05em; }
+/* sup+sub on the same base: stack both in one narrow column (x₁²) */
+.mq-scripts-stack {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  vertical-align: -0.18em;
+  line-height: 1.05;
+}
+.mq-scripts-stack .mq-sup { vertical-align: baseline; padding-left: 0.06em; line-height: 1.05; }
+.mq-scripts-stack .mq-sub { vertical-align: baseline; padding-left: 0.06em; line-height: 1.05; }
+/* inside the stacked column the relative lift must NOT apply again */
+.mq-scripts-stack .mq-sup { top: 0; }
+.mq-scripts-stack .mq-sub { top: 0; }
+
+/* radical */
+.mq-sqrt { display: inline-flex; align-items: stretch; white-space: nowrap; }
+.mq-sqrt-idx { font-size: 0.62em; align-self: flex-start; margin-right: -0.55em; transform: translateY(0.15em); }
+.mq-sqrt-glyph { font-size: 1.12em; line-height: 1; }
+.mq-sqrt-body {
+  border-top: 1.1px solid currentColor;
+  padding: 0.05em 0.2em 0 0.25em;
+  margin-left: -0.08em;
+}
+
+/* big operators + limits */
+.mq-bigop { display: inline-flex; flex-direction: column; align-items: center; vertical-align: middle; margin: 0 0.2em; line-height: 1; }
+.mq-bigop-glyph { font-size: 1.5em; line-height: 0.95; }
+.mq-lim-under { font-size: 0.62em; line-height: 1.05; text-align: center; display: block; }
+
+/* accents */
+.mq-accent { display: inline-block; position: relative; padding-top: 0.32em; }
+.mq-accent-mark {
+  position: absolute;
+  top: -0.08em;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.82em;
+  line-height: 1;
+  color: inherit;
+}
+.mq-accent-bar::before { content: '‾'; }
+.mq-accent-hat::before { content: '^'; }
+.mq-accent-tilde::before { content: '~'; }
+.mq-accent-vec::before { content: '\20D7'; }
+.mq-accent-dot::before { content: '\02D9'; }
+.mq-accent-ddot::before { content: '\00A8'; }
+
+/* delimiters */
+.mq-delim { display: inline-flex; align-items: center; white-space: nowrap; }
+.mq-delimiter { font-size: 1.2em; font-weight: 300; line-height: 1; }
+.mq-delim-body { padding: 0 0.12em; }
+
+/* functions */
+.mq-func { display: inline-block; white-space: nowrap; }
+.mq-func-name { font-style: normal; padding-right: 0.18em; }
+
+/* matrix — real ruled grid like Word's matrices */
+.mq-matrix { display: inline-grid; margin: 0.15em 0.3em; vertical-align: middle; }
+.mq-mrow { display: contents; }
+.mq-mcell { padding: 0.12em 0.45em; text-align: center; }
+.mq-matrix { grid-auto-flow: row; }
+.mq-matrix .mq-mrow { display: contents; }
+
+/* cases */
+.mq-cases { display: inline-flex; align-items: stretch; }
+.mq-cases-brace { font-size: 1.6em; font-weight: 300; line-height: 1; }
+.mq-cases-rows { display: flex; flex-direction: column; gap: 0.15em; padding: 0.15em 0.3em; }
+.mq-cases-rows .mq-mrow { display: block; text-align: left; }
+
+/* equation number */
+.mq-numbered { display: inline-flex; align-items: center; gap: 1.6em; }
+.mq-eq-no { font-size: 0.9em; color: inherit; opacity: 0.85; }
+
+/* linear (LaTeX) source editor */
+.mq-linear-src {
+  display: none;
+  direction: ltr;
+  text-align: left;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 13px;
+  background: rgba(148, 163, 184, 0.14);
+  border: 1px solid rgba(124, 176, 224, 0.4);
+  border-radius: 6px;
+  padding: 4px 8px;
+  margin: 2px 0;
+  outline: none;
+  white-space: pre-wrap;
+  user-select: text;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.mq-linear-src:focus { border-color: rgba(124, 176, 224, 0.8); background: rgba(148, 163, 184, 0.18); }
+.mq-export-display { text-align: center; margin: 0.6em 0; direction: ltr; }
+.mq-export-align-left { text-align: left; }
+.mq-export-align-right { text-align: right; }
+.mq-export-display .katex-display { margin: 0; }
+.mq-export-no { display: inline-block; margin-left: 2.5em; opacity: 0.85; }
+
+/* print: keep equations together, never split a fraction across pages */
+@media print {
+  .mq-equation { break-inside: avoid; page-break-inside: avoid; }
+  .mq-export-display { break-inside: avoid; }
+}
+
+/* ── equation UX fixes ────────────────────────────────────────────── */
+.mq-root {
+  white-space: normal;      /* long equations must wrap, not overflow */
+  min-height: 1.15em;
+  min-width: 0.6em;
+}
+.mq-equation { user-select: none; }
+.mq-editing { cursor: text; }
+.mq-equation .mq-linear-src { user-select: text; cursor: text; }
+/* the caret is visible even in an empty (zero-width) list */
+.mq-caret { min-width: 0; }
+.mq-list-empty { display: inline-block; min-width: 0.75em; min-height: 1.1em; }
+/* matrix: crisp cell grid like Word's matrix (no fake brackets) */
+.mq-matrix { display: inline-grid; gap: 0.05em 0.1em; padding: 0.15em 0.25em; border-radius: 4px; }
+.mq-mcell { min-width: 2em; min-height: 1.8em; border-radius: 4px; transition: background 0.1s ease; }
+.mq-editing .mq-mcell:hover { background: rgba(124, 176, 224, 0.14); }
+.mq-editing .mq-mcell:has([data-list]) { cursor: text; }
+/* cases rows keep a left rail under the brace */
+.mq-cases-rows .mq-mrow { min-height: 1.6em; min-width: 2.2em; padding: 0 0.35em; }
+
+/* input boxes: comfortably typeable — the □ placeholder and the dashed
+   empty-slot target are both large enough to aim at and type into */
+.mq-ph {
+  display: inline-block;
+  min-width: 0.9em;
+  min-height: 1.3em;
+  text-align: center;
+  vertical-align: middle;
+}
+.mq-ph span { font-size: 1.15em; line-height: 1; display: inline-block; transform: translateY(0.08em); }
+.mq-editing .mq-cases-rows .mq-mrow:hover { background: rgba(124, 176, 224, 0.08); border-radius: 4px; }
+
+/* ── picker panels: smooth, native-feeling dropdowns ───────── */
+.mq-picker-panel {
+  animation: mq-panel-in 0.14s cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: top left;
+}
+[dir='rtl'] .mq-picker-panel { transform-origin: top right; }
+@keyframes mq-panel-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.mq-picker-panel button { transition: background 0.1s ease, color 0.1s ease; }
+/* structure preview chips: real mini-math, not ASCII */
+.mq-struct-preview {
+  font-family: 'Cambria Math', 'STIX Two Math', 'Times New Roman', serif;
+  font-size: 12px;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+}
+
+/* ── Custom right-click context menu (راست‌کلیک سفارشی) ──────── */
+/* shared frosted-glass surface — EVERY floating/canvas surface in the app
+   uses this ONE recipe: sidebar, panels, cards, modals, menus.
+   Low alpha + very strong blur = clearly glassy while dark text stays
+   readable (the blur smears whatever is behind into a soft glow). */
+.pn-glass-panel {
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(44px) saturate(190%);
+  -webkit-backdrop-filter: blur(44px) saturate(190%);
+}
+.dark .pn-glass-panel {
+  background: rgba(28, 32, 36, 0.58);
+}
+
+/* bright cool app backdrop — gives the glass surfaces something to frost
+   against (plain #fafafa made the glass invisible) */
+.pn-app-bg {
+  background: linear-gradient(180deg, #f8fbfe 0%, #e7eef6 100%);
+}
+.dark .pn-app-bg {
+  background: linear-gradient(180deg, #0c1319 0%, #090e13 100%);
+}
+
+.pn-ctxmenu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 224px;
+  max-width: 260px;
+  max-height: 70vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px;
+  margin: 0;
+  background: rgba(220, 220, 220, 0.45);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 8px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 4px 24px rgba(0, 0, 0, 0.12),
+    0 1px 4px rgba(0, 0, 0, 0.08);
+  font-family: 'Sahel', 'Geist', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 13px;
+  line-height: 1;
+  color: #171717;
+  animation: pn-ctxmenu-in 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: top left;
+}
+[dir='rtl'] .pn-ctxmenu { transform-origin: top right; }
+
+@keyframes pn-ctxmenu-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.dark .pn-ctxmenu {
+  background: rgba(28, 32, 36, 0.35);
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 4px 24px rgba(0, 0, 0, 0.24),
+    0 1px 4px rgba(0, 0, 0, 0.16);
+  color: #ededed;
+}
+
+.pn-ctxmenu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  margin: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  text-align: start;
+  cursor: pointer;
+  transition: background 0.08s ease;
+  white-space: nowrap;
+}
+
+.pn-ctxmenu-item:hover,
+.pn-ctxmenu-item[data-selected='true'] {
+  background: rgba(0, 112, 243, 0.08);
+}
+
+.dark .pn-ctxmenu-item:hover,
+.dark .pn-ctxmenu-item[data-selected='true'] {
+  background: rgba(0, 112, 243, 0.15);
+}
+
+.pn-ctxmenu-item:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.pn-ctxmenu-item.danger {
+  color: #ff5b4f;
+}
+.pn-ctxmenu-item.danger:hover,
+.pn-ctxmenu-item.danger[data-selected='true'] {
+  background: rgba(255, 91, 79, 0.08);
+}
+
+.dark .pn-ctxmenu-item.danger { color: #ff6e5a; }
+.dark .pn-ctxmenu-item.danger:hover,
+.dark .pn-ctxmenu-item.danger[data-selected='true'] {
+  background: rgba(255, 110, 90, 0.12);
+}
+
+.pn-ctxmenu-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  opacity: 0.55;
+}
+
+.pn-ctxmenu-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.pn-ctxmenu-label-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pn-ctxmenu-check {
+  flex-shrink: 0;
+  opacity: 0.7;
+  color: #0070f3;
+}
+
+.pn-ctxmenu-kbd {
+  flex-shrink: 0;
+  margin-inline-start: 16px;
+  font-size: 11px;
+  font-family: 'Geist Mono', 'SF Mono', 'Cascadia Code', Consolas, monospace;
+  color: #999;
+  letter-spacing: 0.02em;
+}
+
+.dark .pn-ctxmenu-kbd { color: #666; }
+
+.pn-ctxmenu-sep {
+  height: 1px;
+  margin: 4px 8px;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+/* fly-out submenu — same skin, tighter max-height */
+.pn-ctxmenu-sub {
+  max-height: 55vh;
+}
+
+/* horizontal quick-format card (SelectionToolbar) — same skin as the menu,
+   centered directly above it and part of the same floating unit */
+.pn-ctxmenu-toolbar {
+  position: fixed;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  margin: 0;
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(44px) saturate(190%);
+  -webkit-backdrop-filter: blur(44px) saturate(190%);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+  box-shadow:
+    0 4px 24px rgba(0, 0, 0, 0.12),
+    0 1px 4px rgba(0, 0, 0, 0.08);
+  font-family: 'Sahel', 'Geist', -apple-system, BlinkMacSystemFont, sans-serif;
+  color: #171717;
+  animation: pn-ctxmenu-in 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: top right;
+}
+
+.dark .pn-ctxmenu-toolbar {
+  background: rgba(28, 32, 36, 0.58);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: #ededed;
+}
+
+/* the toolbar card animates with transform (→ its own stacking context), so
+   its dropdown panels would otherwise render BENEATH the menu card — lift
+   every dropdown panel opened while a ctx-menu toolbar is on screen above
+   it. The panels PORTAL to document.body (NOT inside the toolbar), so the
+   old descendant selector never matched — the font/size dropdowns of the
+   right-click quick-format card rendered UNDER the vertical menu. :has()
+   keys the lift to the toolbar's presence in the same tree (body). */
+body:has(.pn-ctxmenu-toolbar) [data-color-palette],
+body:has(.pn-ctxmenu-toolbar) [data-select-popover],
+.pn-ctxmenu-toolbar [data-color-palette],
+.pn-ctxmenu-toolbar [data-select-popover] {
+  z-index: 10000;
+}
+
+/* submenu indicator — RTL: fly-out is to the LEFT */
+.pn-ctxmenu-chevron {
+  flex-shrink: 0;
+  margin-inline-start: 10px;
+  opacity: 0.45;
+}
+
+.pn-ctxmenu-item[data-sub-open='true'] .pn-ctxmenu-chevron { opacity: 0.8; }
+
+/* inline color swatch inside an action row (e.g. مشکی) */
+.pn-ctxmenu-swatch {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border-radius: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+/* compact row of color dots (رنگ‌های اخیر) */
+.pn-ctxmenu-swatchrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+}
+
+.pn-ctxmenu-swatchrow[data-selected='true'] {
+  background: rgba(0, 112, 243, 0.08);
+  border-radius: 6px;
+}
+
+.dark .pn-ctxmenu-swatchrow[data-selected='true'] {
+  background: rgba(0, 112, 243, 0.15);
+}
+
+.pn-ctxmenu-swatchdot {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: transform 0.08s ease;
+}
+
+.pn-ctxmenu-swatchdot:hover {
+  transform: scale(1.15);
+}
+
+.dark .pn-ctxmenu-swatchdot { border-color: rgba(255, 255, 255, 0.2); }
+
+.dark .pn-ctxmenu-sep { background: rgba(255, 255, 255, 0.06); }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Page Sidebar — polished compact page navigator
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Collapsed rail */
+.pn-pages-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 40px;
+  flex-shrink: 0;
+  padding: 10px 0;
+  background: #fff;
+  border-left: 1px solid rgba(0,0,0,0.05);
+}
+.dark .pn-pages-rail { background: #111; border-left-color: rgba(255,255,255,0.06); }
+
+.pn-pages-rail-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 6px;
+  color: #888; border: none; background: none; cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+.pn-pages-rail-btn:hover { background: rgba(0,0,0,0.05); color: #444; }
+.dark .pn-pages-rail-btn { color: #777; }
+.dark .pn-pages-rail-btn:hover { background: rgba(255,255,255,0.08); color: #bbb; }
+
+.pn-pages-rail-count {
+  display: flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 6px;
+  background: rgba(0,0,0,0.04); font-size: 10px; font-weight: 700;
+  color: #666; letter-spacing: -0.02em;
+}
+.dark .pn-pages-rail-count { background: rgba(255,255,255,0.07); color: #999; }
+
+/* Expanded sidebar */
+.pn-pages-sidebar {
+  display: flex; flex-direction: column;
+  width: 200px; flex-shrink: 0;
+  background: #fafafa;
+  border-left: 1px solid rgba(0,0,0,0.06);
+}
+.dark .pn-pages-sidebar { background: #111; border-left-color: rgba(255,255,255,0.06); }
+
+/* Header */
+.pn-pages-header {
+  display: flex; align-items: center; gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(0,0,0,0.05);
+}
+.dark .pn-pages-header { border-bottom-color: rgba(255,255,255,0.06); }
+
+.pn-pages-title {
+  font-size: 12px; font-weight: 600;
+  color: #333; letter-spacing: 0.01em;
+}
+.dark .pn-pages-title { color: #ddd; }
+
+.pn-pages-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 4px;
+  border-radius: 9px; background: rgba(0,0,0,0.05);
+  font-size: 10px; font-weight: 600; color: #888;
+}
+.dark .pn-pages-count { background: rgba(255,255,255,0.08); color: #999; }
+
+.pn-pages-header-spacer { flex: 1; }
+
+.pn-pages-header-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 5px;
+  color: #999; border: none; background: none; cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+.pn-pages-header-btn:hover { background: rgba(0,0,0,0.05); color: #555; }
+.dark .pn-pages-header-btn { color: #777; }
+.dark .pn-pages-header-btn:hover { background: rgba(255,255,255,0.08); color: #bbb; }
+
+/* Search */
+.pn-pages-search {
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(0,0,0,0.05);
+}
+.dark .pn-pages-search { border-bottom-color: rgba(255,255,255,0.06); }
+
+.pn-pages-search-inner {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 8px; border-radius: 6px;
+  background: rgba(0,0,0,0.03);
+  border: 1px solid rgba(0,0,0,0.06);
+}
+.dark .pn-pages-search-inner { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.08); }
+
+.pn-pages-search-input {
+  width: 100%; background: transparent; border: none; outline: none;
+  font-size: 11px; color: #333;
+}
+.pn-pages-search-input::placeholder { color: #bbb; }
+.dark .pn-pages-search-input { color: #ddd; }
+.dark .pn-pages-search-input::placeholder { color: #555; }
+
+/* Thumbnail list */
+.pn-pages-list {
+  flex: 1; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 8px 10px;
+}
+.pn-pages-list::-webkit-scrollbar { width: 3px; }
+.pn-pages-list::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 3px; }
+.dark .pn-pages-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); }
+
+.pn-pages-empty {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 32px 0; color: #bbb; font-size: 11px;
+}
+
+/* Per-page item */
+.pn-page-item {
+  position: relative;
+  display: flex; flex-direction: column;
+  transition: opacity 0.1s;
+}
+.pn-page-item.is-dragged { opacity: 0.35; }
+
+.pn-page-drop-line {
+  position: absolute; left: 0; right: 0; z-index: 2;
+  border-radius: 1px; background: #0070f3;
+}
+
+/* Meta row: number + title */
+.pn-page-meta {
+  display: flex; align-items: baseline; gap: 5px;
+  padding: 0 2px 3px;
+}
+
+.pn-page-num {
+  font-size: 10px; font-weight: 700; color: #aaa;
+  font-variant-numeric: tabular-nums;
+  min-width: 12px;
+}
+.dark .pn-page-num { color: #666; }
+
+.pn-page-title {
+  font-size: 10px; color: #999;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0;
+}
+.dark .pn-page-title { color: #666; }
+
+/* Thumbnail wrapper */
+.pn-page-thumb-wrap { position: relative; }
+
+/* Thumbnail button */
+/* Thumbnail button — width is derived from height using the real A4 ratio
+   (794×1123, same box the .pn-page-thumb-inner content is scaled to) instead
+   of stretching to the full sidebar width, so the box never shows blank
+   space beside a page that is actually a tall rectangle, not a square. */
+.pn-page-thumb {
+  display: block; height: 191px; width: auto; aspect-ratio: 794 / 1123;
+  max-width: 100%; margin: 0 auto;
+  border-radius: 5px; overflow: hidden;
+  cursor: pointer; border: none; background: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04);
+  transition: box-shadow 0.12s, transform 0.12s;
+  position: relative;
+  padding: 0;
+}
+.dark .pn-page-thumb { background: #1a1a1a; box-shadow: 0 1px 3px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.04); }
+.pn-page-thumb:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.06);
+  transform: translateY(-1px);
+}
+.pn-page-thumb.is-active {
+  box-shadow: 0 0 0 2px #0070f3, 0 2px 8px rgba(0,112,243,0.12);
+}
+.pn-page-thumb.is-active:hover {
+  box-shadow: 0 0 0 2px #0070f3, 0 3px 12px rgba(0,112,243,0.18);
+}
+.pn-page-thumb:active { transform: scale(0.985); }
+
+.pn-page-thumb-inner {
+  pointer-events: none; user-select: none;
+  position: absolute; top: 0; left: 0;
+  width: 794px; height: 1123px;
+  transform: scale(0.17); transform-origin: top left;
+}
+
+.pn-page-thumb-empty {
+  display: flex; align-items: center; justify-content: center;
+  height: 191px; width: auto; aspect-ratio: 794 / 1123; max-width: 100%; margin: 0 auto;
+  font-size: 11px; color: #ccc;
+}
+.dark .pn-page-thumb-empty { color: #444; }
+
+/* ⋮ dots button */
+.pn-page-dots {
+  position: absolute; top: 4px; left: 4px;
+  display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 5px;
+  border: none; cursor: pointer;
+  background: rgba(255,255,255,0.92); color: #777;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+  opacity: 0; transition: opacity 0.1s, background 0.1s;
+}
+.dark .pn-page-dots { background: rgba(30,30,30,0.92); color: #aaa; }
+.pn-page-dots.visible, .pn-page-thumb-wrap:hover .pn-page-dots { opacity: 1; }
+.pn-page-dots:hover { background: rgba(240,240,240,0.95); }
+.dark .pn-page-dots:hover { background: rgba(40,40,40,0.95); }
+
+/* Footer: new page button */
+.pn-pages-footer {
+  padding: 6px 10px 8px;
+  border-top: 1px solid rgba(0,0,0,0.05);
+}
+.dark .pn-pages-footer { border-top-color: rgba(255,255,255,0.06); }
+
+.pn-pages-add-btn {
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+  width: 100%; height: 30px; border-radius: 6px;
+  border: 1px dashed rgba(0,0,0,0.12);
+  background: transparent; cursor: pointer;
+  font-size: 11px; font-weight: 500; color: #999;
+  transition: background 0.1s, border-color 0.1s, color 0.1s;
+}
+.pn-pages-add-btn:hover {
+  background: rgba(0,112,243,0.04);
+  border-color: rgba(0,112,243,0.25);
+  color: #0070f3;
+}
+.dark .pn-pages-add-btn { border-color: rgba(255,255,255,0.1); color: #777; }
+.dark .pn-pages-add-btn:hover { background: rgba(0,112,243,0.08); border-color: rgba(0,112,243,0.3); color: #4da6ff; }

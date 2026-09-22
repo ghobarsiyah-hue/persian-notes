@@ -1,0 +1,13 @@
+import { chromium } from 'playwright-core';
+const browser = await chromium.launch();
+const page = await browser.newPage();
+await page.goto('http://localhost:5173/login', { waitUntil: 'domcontentloaded', timeout: 60000 });
+await page.waitForTimeout(2500);
+await page.fill('input[type="email"]', 'demo@pernote.local');
+await page.fill('input[type="password"]', 'demo1234');
+const bad = [];
+page.on('response', (r) => { if (r.status() >= 300) bad.push(r.status() + ' ' + r.url()); });
+await page.click('button[type="submit"]');
+await page.waitForTimeout(5000);
+console.log(bad.slice(0, 12).join('\n') || 'no-3xx/4xx/5xx-after-submit');
+await browser.close();

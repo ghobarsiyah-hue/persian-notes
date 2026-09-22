@@ -1,0 +1,20 @@
+import { chromium } from 'playwright-core';
+const BASE = process.argv[2] ?? 'http://[::1]:5199';
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1500, height: 950 } });
+page.on('pageerror', (e) => console.log('pageerror:', String(e).slice(0, 200)));
+page.on('response', (r) => { if (r.status() >= 400) console.log('HTTP', r.status(), r.url().slice(-50)); });
+await page.goto(`${BASE}/login`, { waitUntil: 'load', timeout: 60000 });
+await page.waitForSelector('input[type="email"]', { timeout: 30000 });
+const email = `auth2-${Date.now()}@test.local`;
+await page.evaluate(async (em) => {
+  await fetch('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'B کاربر', email: em, password: 'S3cure!pass9' }) });
+}, email);
+await page.fill('input[type="email"]', email);
+await page.fill('input[type="password"]', 'S3cure!pass9');
+await page.click('button[type="submit"]');
+await page.waitForTimeout(3000);
+console.log('url:', page.url());
+const aside = await page.evaluate(() => document.querySelector('aside')?.textContent?.slice(0, 120));
+console.log('aside:', JSON.stringify(aside));
+await browser.close();

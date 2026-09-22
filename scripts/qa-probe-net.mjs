@@ -1,0 +1,10 @@
+import { chromium } from 'playwright-core';
+const browser = await chromium.launch();
+const page = await browser.newPage();
+const fails = [];
+page.on('response', (r) => { if (r.status() >= 400) fails.push(r.status() + ' ' + r.url().slice(0, 140)); });
+page.on('requestfailed', (r) => fails.push('FAILED ' + r.url().slice(0, 140)));
+await page.goto('http://localhost:5173/login', { waitUntil: 'domcontentloaded', timeout: 60000 });
+await page.waitForTimeout(6000);
+console.log(fails.slice(0, 15).join('\n') || 'no-failed-requests');
+await browser.close();

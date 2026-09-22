@@ -1,0 +1,24 @@
+/** Probe: what happens after login on the QA run? Logs URL + errors. */
+import { chromium } from 'playwright-core';
+const VITE = process.argv[2] ?? 'http://localhost:5174';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const browser = await chromium.launch({ headless: true, executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe' });
+const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+page.on('pageerror', (e) => console.log('PAGEERROR:', String(e).slice(0, 200)));
+page.on('console', (m) => { if (m.type() === 'error') console.log('CONSOLE:', m.text().slice(0, 200)); });
+page.on('response', (r) => { if (r.url().includes('/api/') && r.status() >= 400) console.log('HTTP', r.status(), r.url()); });
+await page.goto(`${VITE}/login`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+console.log('URL after goto /login:', page.url());
+await page.waitForSelector('input[type="email"]', { timeout: 30000 });
+await page.fill('input[type="email"]', 'demo@pernote.local');
+await page.fill('input[type="password"]', 'demo1234');
+await page.click('button[type="submit"]');
+await sleep(2500);
+console.log('URL after submit:', page.url());
+await page.goto(`${VITE}/editor/new`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+await sleep(4000);
+console.log('URL after /editor/new:', page.url());
+console.log('editors:', await page.evaluate(() => document.querySelectorAll('.pn-editor').length));
+console.log('papers:', await page.evaluate(() => document.querySelectorAll('.page-paper').length));
+await browser.close();
+process.exit(0);
