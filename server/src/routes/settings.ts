@@ -122,6 +122,9 @@ router.put(
     if (data.editor?.eduBlocks !== undefined) s.markModified('editor.eduBlocks');
     if (data.export) Object.assign(s.export, data.export);
     if (data.ai) Object.assign(s.ai, data.ai);
+    /* Border settings (template colors etc.) — validated above but previously
+       never applied, so picker changes were silently dropped for every template */
+    if (data.border) Object.assign(s.border, data.border);
     if (data.notifications) {
       if (data.notifications.position) s.notifications.position = data.notifications.position;
       if (data.notifications.prefs) Object.assign(s.notifications.prefs, data.notifications.prefs);

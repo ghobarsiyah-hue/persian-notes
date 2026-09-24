@@ -1,5 +1,5 @@
 export type { Group, GroupMember, GroupRole, GroupMembershipStatus } from './group';
-export { GROUP_ROLE_LABELS, GROUP_ROLE_LABELS_PLURAL } from './group';
+export { GROUP_ROLE_LABELS, GROUP_ROLE_LABELS_PLURAL, JOIN_POLICY_LABELS, CONTENT_POLICY_LABELS } from './group';
 
 export interface User {
   id: string;
@@ -145,8 +145,35 @@ export interface EduBlocksSettings {
 /** Visual kind of an editor page:
  *  framed   — A4 sheet with the ornamental border (پیش‌فرض)
  *  blank    — clean white sheet without any frame (صفحه بلنک، بدون قاب)
- *  notebook — ruled notebook-style sheet (صفحه نوت‌بوکی، خط‌دار) */
-export type PageKind = 'framed' | 'blank' | 'notebook';
+ *  notebook — ruled notebook-style sheet (صفحه نوت‌بوکی، خط‌دار)
+ *  cover    — full-bleed image page (جلد اول/دوم/آخر — عکس + عنوان اختیاری)
+ *  toc      — فهرست مطالب: عنوان‌بندی سند به‌صورت خودکار (auto-filled at print)
+ *  booklet  — خیلی سبز: قاب دولایهٔ ظریف + flourish + شماره صفحه + waveform + باکس لوگو */
+export type PageKind = 'framed' | 'blank' | 'notebook' | 'cover' | 'toc' | 'booklet';
+
+/** kind of cover page — which position it decorates (item 15) */
+export type CoverSlot = 'first' | 'second' | 'last';
+
+/** data carried by a cover page: the uploaded artwork + optional caption */
+export interface CoverData {
+  slot: CoverSlot;
+  /** data-URL of the uploaded image (auto-fitted by loadImageFile) */
+  src?: string;
+  /** cover fit inside the sheet */
+  fit?: 'cover' | 'contain';
+  title?: string;
+  subtitle?: string;
+}
+
+/** cover metadata stored ON THE PAGE's coverData attr (mergePagesIntoDoc
+ *  persists it on the pageBreak; splitDocIntoPages reads it back) */
+export interface PageCoverAttrs extends Record<string, unknown> {
+  slot?: CoverSlot;
+  coverSrc?: string;
+  coverFit?: 'cover' | 'contain';
+  coverTitle?: string;
+  coverSubtitle?: string;
+}
 
 export interface BorderSettings {
   enabled: boolean;
@@ -162,6 +189,9 @@ export interface BorderSettings {
   showPageNumbers: boolean;
   /** vertical label on the left edge of the frame (empty = default) */
   sideLabel: string;
+  /** lesson/chapter label in the top-left header slot of the frame
+   *  (item 16 — empty = no notch, the top edge stays continuous) */
+  headerLabel?: string;
 }
 
 export const DEFAULT_BORDER_SETTINGS: BorderSettings = {

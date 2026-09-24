@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { Group, type IGroup } from '../../models/Group.js';
+import { Group, type IGroup, readSecuritySettings } from '../../models/Group.js';
 import { GroupMembership, type GroupRole } from '../../models/GroupMembership.js';
 import { User } from '../../models/User.js';
 import { Notification } from '../../models/Notification.js';
@@ -19,8 +19,13 @@ export interface PublicGroup {
   name: string;
   avatar: string | null;
   description: string;
+  /** hex accent color or null = system accent (consumed by the group UI) */
+  accentColor: string | null;
   ownerId: string;
   memberCount: number;
+  /** security model — every client renders its join/edit UX from these */
+  joinPolicy: 'invite' | 'open';
+  contentPolicy: 'members' | 'public';
   myRole: GroupRole | null;
   myStatus: string | null;
   createdAt: string;
@@ -33,8 +38,10 @@ function publicGroup(g: IGroup, memberCount: number, myRole: GroupRole | null, m
     name: g.name,
     avatar: g.avatar ?? null,
     description: g.description ?? '',
+    accentColor: g.accentColor ?? null,
     ownerId: String(g.ownerId),
     memberCount,
+    ...readSecuritySettings(g),
     myRole,
     myStatus,
     createdAt: g.createdAt.toISOString(),
@@ -50,6 +57,7 @@ export interface CreateGroupInput {
   name: string;
   description?: string;
   avatar?: string | null;
+  accentColor?: string | null;
 }
 
 /**
@@ -104,6 +112,7 @@ export async function createGroup(ownerUserId: string, input: CreateGroupInput):
               name: input.name,
               description: input.description ?? '',
               avatar: input.avatar ?? null,
+              accentColor: input.accentColor ?? null,
               ownerId: new mongoose.Types.ObjectId(ownerUserId),
             },
           ],
@@ -156,6 +165,7 @@ export async function createGroup(ownerUserId: string, input: CreateGroupInput):
         name: input.name,
         description: input.description ?? '',
         avatar: input.avatar ?? null,
+        accentColor: input.accentColor ?? null,
         ownerId: ownerObjectId,
       },
     ]);
@@ -212,8 +222,10 @@ export async function listMyGroups(userId: string): Promise<PublicGroup[]> {
       name: g.name,
       avatar: g.avatar ?? null,
       description: g.description ?? '',
+      accentColor: g.accentColor ?? null,
       ownerId: String(g.ownerId),
       memberCount: countMap.get(String(g._id)) ?? 0,
+      ...readSecuritySettings(g as IGroup),
       myRole: (m?.role as GroupRole) ?? null,
       myStatus: m ? 'active' : null,
       createdAt: g.createdAt.toISOString(),
@@ -237,18 +249,37 @@ export interface UpdateGroupInput {
   name?: string;
   description?: string;
   avatar?: string | null;
+  accentColor?: string | null;
+  joinPolicy?: 'invite' | 'open';
+  contentPolicy?: 'members' | 'public';
 }
 
 /** UPDATE — caller must already hold group.manageSettings (checked by the
- *  route via authorize()). Returns the fresh public shape. */
-export async function updateGroup(groupId: string, _actorId: string, patch: UpdateGroupInput): Promise<PublicGroup> {
-  const group = await Group.findByIdAndUpdate(
-    groupId,
-    { $set: patch },
-    { new: true, runValidators: true }
-  );
+ *  route via authorize()). Returns the fresh public shape WITH the caller's
+ *  membership resolved: the previous behavior returned myRole/myStatus = null,
+ *  which flipped the client's settings panel into read-only mode right after
+ *  the first save — the owner could never edit the group again without a
+ *  full page reload (item ۲). */
+export async function updateGroup(groupId: string, actorId: string, patch: UpdateGroupInput): Promise<PublicGroup> {
+  /* the security slice lives INSIDE the settings bag — projected out of the
+     flat patch and merged so partial updates never drop the other slice */
+  const { joinPolicy, contentPolicy, ...rest } = patch;
+  const securityPatch: Record<string, unknown> = {};
+  if (joinPolicy) securityPatch.joinPolicy = joinPolicy;
+  if (contentPolicy) securityPatch.contentPolicy = contentPolicy;
+
+  let group = await Group.findById(groupId);
   if (!group) throw new ApiError(404, 'گروه یافت نشد.');
-  return publicGroup(group, await countActiveMembers(groupId), null, null);
+  if (Object.keys(securityPatch).length > 0) {
+    const current = readSecuritySettings(group);
+    group.set('settings', { ...(group.settings ?? {}), ...current, ...securityPatch });
+    group.markModified('settings');
+  }
+  if (Object.keys(rest).length > 0) group.set(rest as Record<string, unknown>);
+  group = await group.save({ validateBeforeSave: true });
+  /* resolve the CALLER's membership so the client keeps its edit rights */
+  const m = await GroupMembership.findOne({ groupId: group._id, userId: actorId, status: 'active' }).lean();
+  return publicGroup(group, await countActiveMembers(groupId), (m?.role as GroupRole) ?? null, m ? 'active' : null);
 }
 
 /** DELETE — owner-only (route enforces group.delete). Removes the group and

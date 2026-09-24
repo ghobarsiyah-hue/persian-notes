@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Modal, Button } from '@/components/ui';
+import { SidePanel, Button } from '@/components/ui';
 import { useApp } from '@/store/AppProvider';
 import { faDigits } from '@/utils/fa';
 import type { EduBlocksSettings } from '@/types';
@@ -295,8 +295,8 @@ export function EduBlocksModal({ open, onClose }: { open: boolean; onClose: () =
   ];
 
   return (
-    <Modal open={open} onClose={onClose} title="شخصی‌سازی کادرهای آموزشی" wide>
-      <div className="grid gap-5 md:grid-cols-[1fr_300px]">
+    <SidePanel open={open} onClose={onClose} title="شخصی‌سازی کادرهای آموزشی">
+      <div className="grid gap-5 md:grid-cols-[1fr_280px]">
         {/* ── controls ── */}
         <div className="space-y-4">
           <div className="flex gap-1 rounded-lg bg-ink-100 p-1 dark:bg-ink-800">
@@ -568,7 +568,7 @@ export function EduBlocksModal({ open, onClose }: { open: boolean; onClose: () =
         {/* ── live preview ── */}
         <div>
           <div className="mb-1.5 text-[13px] font-medium text-ink-700 dark:text-ink-300">پیش‌نمایش زنده</div>
-          <div className="edu-preview max-h-[470px] space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-inner ring-1 ring-ink-100 dark:bg-ink-950 dark:ring-ink-800">
+          <div className="edu-preview space-y-3 rounded-xl bg-white p-4 shadow-inner ring-1 ring-ink-100 dark:bg-ink-950 dark:ring-ink-800">
             {EDU_FAMILIES.filter((f) => f !== 'formula').map((f) => (
               <PreviewBlock key={f} family={f} settings={draft} showIcon={draft.iconsVisible} />
             ))}
@@ -595,6 +595,6 @@ export function EduBlocksModal({ open, onClose }: { open: boolean; onClose: () =
           </Button>
         </div>
       </div>
-    </Modal>
+    </SidePanel>
   );
 }

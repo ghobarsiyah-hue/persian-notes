@@ -48,21 +48,38 @@ import { SlashCommand } from '@/editor/extensions/SlashCommand';
 import { DragHandle } from '@/editor/extensions/DragHandle';
 import { PageBreak } from '@/editor/extensions/PageBreak';
 import { TableEscape } from '@/editor/extensions/TableEscape';
+import { BlockEnter } from '@/editor/extensions/BlockEnter';
 import { TableRowResizing } from '@/editor/extensions/TableRowResizing';
 import { PagedDoc } from '@/editor/extensions/PagedDoc';
 import { FixedPageGuard } from '@/editor/extensions/FixedPageGuard';
 import { flowEngineActiveRef } from '@/editor/flowEngineState';
 import { scaleToFit, insertionArea } from '@/editor/pageCapacity';
 import { emitCapacityReject } from '@/editor/paginationMode';
+import { loadImageFile, floatDimsFor } from '@/utils/imageFile';
 import { InlineIcon } from '@/editor/extensions/InlineIcon';
 import { ListMarker } from '@/editor/extensions/ListMarker';
-import { PageBorder } from '@/components/border/PageBorder';
-import { DEFAULT_BORDER_SETTINGS, type BorderSettings, type PageKind } from '@/types';
+import { PageBorder, BookletChrome } from '@/components/border/PageBorder';
+import { DEFAULT_BORDER_SETTINGS, type BorderSettings, type PageKind, type PageCoverAttrs } from '@/types';
 import { FloatingLayer } from '@/components/editor/FloatingLayer';
 import type { FloatingElement } from '@/components/editor/FloatingLayer';
 
 const A4_W_PX = 794;
 const A4_H_PX = 1123;
+
+/** reentrancy guard for the nested-contenteditable beforeinput trap: the
+ *  execCommand() calls it makes fire beforeinput AGAIN (synthetic), and the
+ *  trap must be transparent to those or it would loop forever. Module-scope:
+ *  one flag per process is enough — the guarded region is synchronous. */
+let pnNestedEditApplying = false;
+
+/** every nested contenteditable span the trap protects: question/box titles,
+ *  MCQ option texts, comparison-table labels, pro/con + code/output areas.
+ *  (Chromium retargets their beforeinput/input to the PM root — the trap
+ *  decides by the caret's anchorNode, which is never retargeted.) */
+const NESTED_EDIT_SPANS = [
+  '.edu-title-text', '.quiz-opt-text', '.cmp-label',
+  '.edu-procon-text', '.edu-code-area', '.edu-code-out',
+].join(', ');
 
 /** Border shown on workspace pages — exported so the pages-sidebar thumbnails
  *  render the exact same قاب and previews stay pixel-identical to the page. */
@@ -143,6 +160,15 @@ export function buildEditorExtensions() {
             default: null as string | null,
             parseHTML: (el) => el.getAttribute('data-tstyle'),
             renderHTML: (a) => (a.tstyle ? { 'data-tstyle': a.tstyle } : {}),
+          },
+          /* رنگ خطوط بین سلول‌ها (گرید) — از تب «جدول» قابل تغییر است؛
+             null = پیش‌فرض بنفش سیستم. در CSS/چاپ/Word یکسان خوانده می‌شود.
+             renderHTML هم --pn-grid را inline می‌گذارد تا HTML خروجی بدون
+             NodeView (پیش‌نمایش چاپ) همان رنگ گرید را بگیرد */
+          gridColor: {
+            default: null as string | null,
+            parseHTML: (el) => el.getAttribute('data-grid'),
+            renderHTML: (a) => (a.gridColor ? { 'data-grid': a.gridColor, style: `--pn-grid:${a.gridColor}` } : {}),
           },
         };
       },
@@ -320,20 +346,29 @@ export function buildEditorExtensions() {
        Registered LAST: its handleKeyDown must run after the stock table
        plugins (which no-op on these cases) and before the default
        SplitBlock fallback. */
-    TableEscape,
-    /* ManualFixedPagePolicy (paginationMode.ts): rejects transactions whose
+      TableEscape,
+      /* THE Enter contract (item ۵): Enter = new line inside the box (list
+         items: empty item lifts — the universal end-of-list reflex);
+         Shift+Enter = exit the box below (plain text keeps the stock soft
+         break). One plugin so title handlers, TableEscape and stock rules
+         never fight over the two keys. */
+      BlockEnter,
+      /* ManualFixedPagePolicy (paginationMode.ts): rejects transactions whose
        rendered result would overflow the sheet — WITHOUT ever making the
        page read-only (deletion/selection/editing stay free). Registered
        last; inert the moment the pagination mode flips to 'smart'. */
-    FixedPageGuard,
+      FixedPageGuard,
   ];
 }
 
 export interface PageProps {
   pageId: string;
   pageNumber: number;
-  /** visual kind of this sheet: framed (قاب‌دار) | blank (بدون قاب) | notebook (نوت‌بوکی) */
+  /** visual kind of this sheet: framed (قاب‌دار) | blank (بدون قاب) | notebook (نوت‌بوکی)
+   *  | cover (جلد — عکس تمام‌صفحه) | toc (فهرست) */
   kind?: PageKind;
+  /** cover metadata (item 15): slot/src/fit/title for cover sheets */
+  coverAttrs?: PageCoverAttrs;
   /** the user's REAL persisted border settings (design tab) — when omitted,
    *  PAGE_PREVIEW_BORDER (the classic navy/gold frame) is used */
   borderSettings?: BorderSettings;
@@ -410,40 +445,32 @@ function insertImageFiles(
   const images = Array.from(files ?? []).filter((f) => f.type.startsWith('image/'));
   if (images.length === 0) return false;
   images.forEach((file) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result !== 'string') return;
-      const src = reader.result;
-      /* window.Image — the DOM constructor; `Image` here is the TipTap extension */
-      const img = new window.Image();
-      img.onload = () => {
-        const natW = img.naturalWidth || 600;
-        const natH = img.naturalHeight || 400;
+    /* بدون محدودیت حجم — loadImageFile تصاویر بزرگ را خودکار به کیفیت چاپ
+       می‌رساند؛ سپس یا شناور (paste) یا درون‌متنی با fit واقعی صفحه */
+    loadImageFile(file)
+      .then((img) => {
         if (floatInsert) {
           /* paste becomes a floating object — cap to a sane width so a
              full-res screenshot does not fill the whole sheet; the floating
              layer's own placement/bounds policy takes it from here */
-          const w = Math.min(480, natW);
-          const h = Math.round(w * (natH / natW));
-          floatInsert(src, w, h, natW / natH);
+          const { width, height } = floatDimsFor(img, 480);
+          floatInsert(img.src, width, height, img.aspectRatio);
           return;
         }
         /* fallback (no float bridge wired): in-text image, scaled to fit */
         const { schema } = view.state;
         const area = insertionArea(view);
-        const fit = scaleToFit(natW, natH, area.width, area.height);
+        const fit = scaleToFit(img.naturalWidth, img.naturalHeight, area.width, area.height);
         if (!fit.fits) {
           emitCapacityReject('تصویر در فضای باقی‌مانده صفحه جا نمی‌شود');
           return;
         }
-        const node = schema.nodes.image?.create({ src, alt: file.name, width: fit.width });
+        const node = schema.nodes.image?.create({ src: img.src, alt: file.name, width: fit.width });
         if (!node) return;
         const tr = view.state.tr.replaceSelectionWith(node);
         view.dispatch(tr.scrollIntoView());
-      };
-      img.src = src;
-    };
-    reader.readAsDataURL(file);
+      })
+      .catch(() => undefined);
   });
   return true;
 }
@@ -469,6 +496,7 @@ export const Page = memo(function PageInner({
   pageNumber,
   kind = 'framed',
   borderSettings,
+  coverAttrs,
   content,
   fontSize,
   lineHeight,
@@ -557,6 +585,13 @@ export const Page = memo(function PageInner({
               parseHTML: (el) => el.getAttribute('data-tstyle'),
               renderHTML: (a) => (a.tstyle ? { 'data-tstyle': a.tstyle } : {}),
             },
+            /* رنگ خطوط بین سلول‌ها (گرید) — از تب «جدول» قابل تغییر است؛
+               null = پیش‌فرض بنفش سیستم. در CSS/چاپ/Word یکسان خوانده می‌شود */
+            gridColor: {
+              default: null as string | null,
+              parseHTML: (el) => el.getAttribute('data-grid'),
+              renderHTML: (a) => (a.gridColor ? { 'data-grid': a.gridColor, style: `--pn-grid:${a.gridColor}` } : {}),
+            },
           };
         },
         /* ═══ THE design-attrs DOM bridge ═══
@@ -577,6 +612,12 @@ export const Page = memo(function PageInner({
               el.toggleAttribute('data-striped', a.striped === true);
               el.toggleAttribute('data-borderless', a.borderless === true);
               if (a.tstyle) el.setAttribute('data-tstyle', String(a.tstyle)); else el.removeAttribute('data-tstyle');
+              if (a.gridColor) el.setAttribute('data-grid', String(a.gridColor)); else el.removeAttribute('data-grid');
+              /* the resolved color rides as an inline custom property —
+                 attr() type(<color>) is unreliable in the print clone, but
+                 var(--pn-grid) works in the editor, print clone and PDF */
+              if (a.gridColor) el.style.setProperty('--pn-grid', String(a.gridColor));
+              else el.style.removeProperty('--pn-grid');
               if (a.align) el.setAttribute('data-align', String(a.align)); else el.removeAttribute('data-align');
               if (a.cellpad) el.setAttribute('data-cellpad', String(a.cellpad)); else el.removeAttribute('data-cellpad');
               /* whole-table width (resize grip) — the width style lives in
@@ -734,6 +775,10 @@ export const Page = memo(function PageInner({
          plugins (which no-op on these cases) and before the default
          SplitBlock fallback. */
       TableEscape,
+      /* THE Enter contract (item ۵): Enter = new line inside the box (list
+         items: empty item lifts); Shift+Enter = exit the box below. Same
+         plugin as the static schema — the two surfaces stay identical. */
+      BlockEnter,
       /* ManualFixedPagePolicy (paginationMode.ts): rejects transactions whose
          rendered result would overflow the sheet — WITHOUT ever making the
          page read-only (deletion/selection/editing stay free). Registered
@@ -763,6 +808,40 @@ export const Page = memo(function PageInner({
         class: 'pn-editor focus:outline-none',
         'data-gramm': 'false',
       },
+      /* ── Backspace/Delete in nested edit spans (edu titles, MCQ options) ──
+         Chromium reports these spans' keydown with target = the PM ROOT
+         (focus lives on the contenteditable host, not the nested span), so
+         span-level keydown listeners NEVER fire and PM's own keydown
+         handler decides from its INTERNAL doc selection: it preventDefaults
+         and deletes NOTHING — Backspace inside a question title silently
+         no-opped. This handler runs FIRST on the same (retargeted) event,
+         checks where the DOM caret ACTUALLY is, applies the deletion with
+         execCommand (the MutationObserver on the span then syncs attrs)
+         and consumes the key so PM never acts on its stale selection. */
+      handleKeyDown: (_view: unknown, event: KeyboardEvent) => {
+        if (event.key !== 'Backspace' && event.key !== 'Delete') return false;
+        const sel = window.getSelection();
+        const anchor = sel?.anchorNode ?? null;
+        if (!anchor) return false;
+        const span = (anchor instanceof Element ? anchor : anchor.parentElement)?.closest?.(NESTED_EDIT_SPANS) as HTMLElement | null;
+        if (!span || !span.isContentEditable) return false;
+        if ((span.textContent ?? '') === '' && event.key === 'Backspace' && sel?.isCollapsed) {
+          /* empty title: let the span's own hop-out logic move the caret
+             back — nothing to delete inside the span itself */
+          return false;
+        }
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        pnNestedEditApplying = true;
+        try {
+          if (sel?.isCollapsed) {
+            document.execCommand(event.key === 'Backspace' ? 'delete' : 'forwardDelete', false);
+          } else {
+            document.execCommand('delete', false);
+          }
+        } finally { pnNestedEditApplying = false; }
+        return true;
+      },
       /* real focus (click, Tab, programmatic) is THE active-page signal:
          keyboard input always lands in the focused editor, so the parent
          must track focus, not merely mousedown — a click on a not-yet
@@ -775,20 +854,53 @@ export const Page = memo(function PageInner({
          to the PM root; PM would then apply the char at its INTERNAL
          selection (the body paragraph) and the caret "jumps" out of the
          question title while typing fast. Trap it: apply the insertion
-         inside the span ourselves and block PM. */
+         inside the span ourselves and block PM.
+
+         The span is found via the LIVE DOM SELECTION (anchorNode), NOT
+         event.target: the retargeting that makes PM see the event also
+         rewrites event.target to the nearest editable ancestor (the PM
+         root), so a target-based closest() misses exactly the cases it
+         must catch. The caret's anchorNode is never retargeted.
+
+         Reentrancy: our own execCommand() calls below fire beforeinput
+         again (Chromium synthesizes it); the `applying` flag makes the
+         trap transparent to them so the fallback path never loops. */
         beforeinput: (_view: unknown, event: InputEvent) => {
-          const target = event.target as HTMLElement | null;
-          const span = (target?.closest?.('.edu-title-text') || target?.closest?.('.quiz-opt-text')) as HTMLElement | null;
+          if (pnNestedEditApplying) return false;
+          const sel = window.getSelection();
+          const anchor = sel?.anchorNode ?? null;
+          if (!anchor) return false;
+          const span = (anchor instanceof Element ? anchor : anchor.parentElement)?.closest?.(NESTED_EDIT_SPANS) as HTMLElement | null;
           if (!span || !span.isContentEditable) return false;
           const t = event.inputType || '';
           const inserting =
             t === 'insertText' || t === 'insertCompositionText' ||
             t === 'insertReplacementText';
-          if (!inserting) return false;
+          const deleting =
+            t === 'deleteContentBackward' || t === 'deleteContentForward' ||
+            t === 'deleteWordBackward' || t === 'deleteWordForward' ||
+            t === 'deleteByCut' || t === 'deleteByDrag';
+          if (t === 'insertParagraph' || t === 'insertLineBreak') {
+            /* Enter must never structure-edit through PM from these spans;
+               the span keydown handlers already decide what Enter means */
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            return true;
+          }
+          if (!inserting && !deleting) return false;
           event.preventDefault();
           event.stopImmediatePropagation();
-          const data = event.data ?? '';
-          if (data) document.execCommand('insertText', false, data);
+          pnNestedEditApplying = true;
+          try {
+            if (inserting) {
+              const data = event.data ?? '';
+              if (data) document.execCommand('insertText', false, data);
+            } else if (sel && !sel.isCollapsed) {
+              document.execCommand('delete', false);
+            } else {
+              document.execCommand(t === 'deleteContentForward' || t === 'deleteWordForward' ? 'forwardDelete' : 'delete', false);
+            }
+          } finally { pnNestedEditApplying = false; }
           return true;
         },
         focus: () => {
@@ -867,6 +979,58 @@ export const Page = memo(function PageInner({
     >
       {kind === 'framed' && (
         <PageBorder settings={borderSettings ?? PAGE_PREVIEW_BORDER} pageNumber={pageNumber} />
+      )}
+      {/* ── خیلی سبز (booklet): page-chrome layer — fine double frame,
+          flourish, page-number circle + waveform, logo box. aria-hidden
+          SVG background OUTSIDE the editor DOM: no nodes, no text nodes,
+          no floating element, no undo steps, no transactions. The logo is
+          painted by the chrome itself and can never be selected/dragged. */}
+      {kind === 'booklet' && (
+        <BookletChrome settings={borderSettings ?? PAGE_PREVIEW_BORDER} pageNumber={pageNumber} />
+      )}
+      {/* ── جلد (item 15): uploaded artwork behind an editable title band ──
+          the editor itself stays (empty paragraph), so the sheet keeps its
+          ProseMirror binding and the collab fragment — the artwork is a
+          layer under the content, like the notebook ruling. */}
+      {kind === 'cover' && (
+        <div className="page-cover-layer" aria-hidden={coverAttrs?.coverSrc ? 'false' : 'true'}>
+          {coverAttrs?.coverSrc ? (
+            <img
+              src={coverAttrs.coverSrc}
+              alt=""
+              className="absolute inset-0 h-full w-full"
+              style={{ objectFit: coverAttrs.coverFit === 'contain' ? 'contain' : 'cover' }}
+              draggable={false}
+            />
+          ) : (
+            <div className="absolute inset-0 bg-gradient-to-b from-ink-50 to-white dark:from-ink-900 dark:to-ink-950" />
+          )}
+          {(coverAttrs?.coverTitle || coverAttrs?.coverSubtitle) && (
+            <div className="absolute inset-x-0 bottom-14 flex flex-col items-center gap-1 px-10 text-center">
+              {coverAttrs?.coverTitle && (
+                <span className="max-w-full truncate rounded-lg bg-black/60 px-4 py-1.5 text-2xl font-extrabold text-white shadow-lg">{coverAttrs.coverTitle}</span>
+              )}
+              {coverAttrs?.coverSubtitle && (
+                <span className="max-w-full truncate rounded-md bg-black/45 px-3 py-1 text-sm text-white/90">{coverAttrs.coverSubtitle}</span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      {/* ── فهرست (item 15): ruled index sheet the user fills by hand ── */}
+      {kind === 'toc' && (
+        <div className="page-toc-layer" aria-hidden="true">
+          <div className="page-toc-heading">فهرست مطالب</div>
+          <div className="page-toc-lines">
+            {Array.from({ length: 22 }, (_, i) => (
+              <div className="page-toc-row" key={i}>
+                <span className="page-toc-title" />
+                <span className="page-toc-dots" />
+                <span className="page-toc-num" />
+              </div>
+            ))}
+          </div>
+        </div>
       )}
       {kind === 'notebook' && (
         <div

@@ -35,12 +35,31 @@ npm run seed        # demo user: demo@pernote.local / demo1234
 
 The login page has a one-click **demo login** button.
 
-### MongoDB
+### MongoDB (no install needed for dev)
 
 The server connects to `MONGODB_URI` (default `mongodb://127.0.0.1:27017/persian-notes`).
-If MongoDB is not installed and `ALLOW_DB_FALLBACK=true`, the server starts an
-**in-memory MongoDB** and clearly logs it — data is lost on restart. For real
-persistence, install MongoDB or point `MONGODB_URI` at Atlas.
+If MongoDB is not reachable and `ALLOW_DB_FALLBACK=true` (the default), it
+starts a **persistent local MongoDB for development** — no installation
+required:
+
+- reuses any mongod binary already on the machine or in the user cache
+  (or point `MONGO_DEV_BINARY` at one explicitly)
+- otherwise downloads the binary **once** via `mongodb-memory-server`
+  (needs internet for the first run only)
+- stores data in `server/.mongo-data`, so accounts and notes **survive
+  restarts**
+
+For production, install MongoDB or point `MONGODB_URI` at Atlas.
+
+## Troubleshooting (خطاهای رایج هنگام اجرا)
+
+| Symptom | Cause & fix |
+|---|---|
+| «پورت 4000/5173 اشغال است» | A previous dev session is still running. Close it (Ctrl+C), or kill it: Windows `netstat -ano | findstr :4000` then `taskkill /PID <pid> /F` · macOS/Linux `lsof -ti :4000 | xargs kill -9` — or run on another port: `PORT=4001 PNBIND_VITE_PORT=5174 npm run dev` |
+| `npm run dev` می‌گوید `sh: tsx: command not found` / vite پیدا نشد | Dependencies not installed — run `npm install` once at the repo root (the pre-flight script does this automatically on the first run) |
+| Node syntax errors on startup | Node < 18 — upgrade from nodejs.org |
+| «هیچ mongod قابل استفاده پیدا نشد» | No local binary and the download failed (offline?). Install MongoDB, or set `MONGO_DEV_BINARY` in `.env` to an existing mongod path |
+| خیلی کند است / ارور عجیب از مسیر OneDrive/Dropbox | Repo lives inside a sync folder — node_modules + mongod files get locked by the sync client. Move the project out, or pause syncing while developing |
 
 ## AI configuration (server-side only)
 

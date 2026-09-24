@@ -75,7 +75,7 @@ export function structureUpdateAuto(session: CollabSession, pageId: string, auto
  * Returns the SAME array reference when nothing changed (identity-stable —
  * callers can skip setPages entirely and avoid re-renders, §25).
  */
-export function reconcilePagesFromStructure<T extends { id: string; pageNumber: number; content: Record<string, unknown> | null; floatingElements: unknown[]; kind: PageKind; auto?: boolean }>(
+export function reconcilePagesFromStructure<T extends { id: string; pageNumber: number; content: Record<string, unknown> | null; floatingElements: unknown[]; kind: PageKind; auto?: boolean; coverAttrs?: unknown }>(
   session: CollabSession,
   current: T[]
 ): T[] | null {
@@ -102,8 +102,12 @@ export function reconcilePagesFromStructure<T extends { id: string; pageNumber: 
       pageNumber: i + 1,
       content: existing?.content ?? { type: 'doc', content: [{ type: 'paragraph' }] },
       floatingElements: existing?.floatingElements ?? [],
-      kind: (meta.kind === 'blank' || meta.kind === 'notebook' ? meta.kind : 'framed') as PageKind,
+      kind: (meta.kind === 'blank' || meta.kind === 'notebook' || meta.kind === 'booklet' || meta.kind === 'cover' || meta.kind === 'toc' ? meta.kind : 'framed') as PageKind,
       auto: meta.auto,
+      /* PRESERVE cover metadata — the reconcile rebuilds the page list from
+         structure alone; dropping this field wiped every cover sheet on
+         each remote structural op (reconile runs on any room change) */
+      coverAttrs: existing?.coverAttrs,
     };
   }) as unknown as T[];
 }

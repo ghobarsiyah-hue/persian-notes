@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, FileText, PenLine, FolderOpen, Users,
   Store, Trash2, Settings, LogOut, PanelRightClose, PanelRightOpen,
@@ -32,7 +32,17 @@ const NAV_SECONDARY = [
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const { logout, online, tags } = useApp();
   const navigate = useNavigate();
+  const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
+
+  /* item ۶ — entering the editor (جزوه‌نویسی) auto-collapses the right rail:
+     the A4 sheet needs every pixel of horizontal room. Leaving the editor
+     restores the expanded rail automatically. The manual toggle still works
+     (user override until the route changes again). */
+  const onEditorRoute = location.pathname.startsWith('/editor');
+  useEffect(() => {
+    setCollapsed(onEditorRoute);
+  }, [onEditorRoute]);
 
   return (
     <div className="pn-app-bg flex h-screen overflow-hidden text-[#171717] dark:text-[#ededed]" dir="rtl">
@@ -48,7 +58,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         {/* Logo + collapse toggle */}
         <div className={`flex items-center gap-1.5 pt-5 pb-4 ${collapsed ? 'flex-col px-1' : 'px-4'}`}>
           <BrandLogo
-            size={collapsed ? 28 : 32}
+            size={collapsed ? 28 : 34}
+            variant="sidebar"
             className="shrink-0 transition-[width,height] duration-200"
           />
           {!collapsed && (

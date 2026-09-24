@@ -6,6 +6,7 @@ import { Spinner, Button, Input } from '@/components/ui';
 import { EduBlocksModal } from '@/components/editor/EduBlocksModal';
 import { BotAvatar, BOT_PROFILES } from '@/components/BotAvatar';
 import { faDigits, formatDate, relativeTime } from '@/utils/fa';
+import { loadAvatarFile } from '@/utils/imageFile';
 import type { NotificationPosition, NotificationPrefs } from '@/types';
 import { WIKI_ARTICLES, findArticle } from '@/wiki/articles';
 
@@ -104,17 +105,17 @@ export default function SettingsPage() {
   const pickAvatar = (file: File | undefined) => {
     setPwError(null);
     if (!file) return;
-    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
-      toast('قالب تصویر باید PNG یا JPG باشد.', 'error');
+    if (!file.type.startsWith('image/')) {
+      toast('فایل انتخاب‌شده تصویر نیست.', 'error');
       return;
     }
-    if (file.size > 150 * 1024) {
-      toast('حجم تصویر باید کمتر از ۱۵۰ کیلوبایت باشد.', 'error');
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => setAvatarPreview(String(reader.result));
-    reader.readAsDataURL(file);
+    /* NO manual size cap: loadAvatarFile auto-fits ANY input (square crop +
+       progressive re-encode) under the server's 150 KB data-URL budget */
+    setBusy('avatar');
+    loadAvatarFile(file)
+      .then((url) => setAvatarPreview(url))
+      .catch((e) => toast((e as Error).message, 'error'))
+      .finally(() => setBusy(null));
   };
 
   const saveAvatar = async () => {
@@ -270,7 +271,7 @@ export default function SettingsPage() {
                       </Button>
                     )}
                   </div>
-                  <p className="text-xs text-ink-500 dark:text-ink-400">PNG یا JPG، حداکثر ۱۵۰ کیلوبایت</p>
+                  <p className="text-xs text-ink-500 dark:text-ink-400">PNG یا JPG — هر حجمی؛ خودکار به اندازهٔ مجاز فشرده می‌شود</p>
                   <input
                     ref={fileRef}
                     type="file"

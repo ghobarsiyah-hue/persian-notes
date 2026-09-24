@@ -123,6 +123,12 @@ function enhanceWordTables(html: string): string {
         ?? /(?:^|;)\s*width\s*:\s*([^;]+)/.exec(table.getAttribute('style') || '')?.[1]?.trim()
         ?? null;
       const tstyle = table.getAttribute('data-tstyle');
+      /* رنگ گرید — MUST resolve even when data-grid is absent (default
+         purple) or the server's #ebebeb fallback wins and the PDF/Word
+         grid never matches the editor. none = بدون خط */
+      const grid = table.getAttribute('data-grid')
+        ?? (/(?:^|;)\s*--pn-grid\s*:\s*([^;]+)/.exec(table.getAttribute('style') || '')?.[1]?.trim())
+        ?? '#b9a7e0';
       if (align) table.setAttribute('align', align);
       if (width) table.setAttribute('width', width);
 
@@ -132,6 +138,13 @@ function enhanceWordTables(html: string): string {
         const h = tr.style.height;
         if (h) tr.setAttribute('height', String(Math.round(parseFloat(h))));
         const cells = Array.from(tr.children) as HTMLElement[];
+        /* گرید سفارشی — رنگ inline روی هر سلول (Word از CSS vars ارث نمی‌برد) */
+        if (grid) {
+          cells.forEach((td) => {
+            if (grid === 'none') { if (!td.style.border) td.style.border = 'none'; }
+            else if (!td.style.borderColor) td.style.borderColor = grid;
+          });
+        }
         /* striping: same parity as the editor's tr:nth-of-type(even) rule
            (row #1 = header, so body rows 2/4/… get tinted everywhere) —
            Word cells carry NO per-cell background unless the user painted
@@ -194,11 +207,58 @@ function enhanceWordTables(html: string): string {
  * (getHTML output — LaTeX sources still un-rendered, exactly what the PDF
  * path receives before renderMathInHtml).
  */
+/** ruled TOC sheet for Word — mirrors the PDF tocLayer (item 15) */
+const WORD_TOC_ISLAND =
+  `<div style="position:relative;width:794px;height:1123px;overflow:hidden">`
+  + `<div style="width:340px;margin:90px auto 30px;text-align:center;font-weight:800;font-size:16pt;color:#1e3a5f;border-bottom:2.5pt solid #c5a24d;padding:0 16px 6px">فهرست مطالب</div>`
+  + `<div style="padding:0 56px">`
+  + Array.from({ length: 22 }, () =>
+      `<div style="display:flex;align-items:baseline;gap:8px;height:34px">`
+      + `<span style="width:46%;border-bottom:1pt solid #d1d5db;height:20px"></span>`
+      + `<span style="flex:1;border-bottom:1pt dotted #9ca3af;height:20px"></span>`
+      + `<span style="width:34px;border-bottom:1pt solid #d1d5db;height:20px"></span>`
+      + `</div>`).join('')
+  + `</div></div><div style="page-break-before:always"></div>`;
+
 export function prepareWordHtml(html: string): string {
   /* tables first (DOM pass — bakes design features Word cannot read from
      CSS); its serialization preserves the attribute order the equation
      regexes below rely on */
   html = enhanceWordTables(html);
+
+  /* item 15 — cover/toc pages: the raw editor HTML has no artwork layer
+     (the cover is a React overlay), so the page-break div's data-* attrs
+     are the ONLY trace of a cover sheet in the export payload. Rebuild
+     the cover artwork + title band (and the toc's ruled sheet) as plain
+     HTML islands Word renders — matching the PDF layer's geometry. Each
+     cover island is placed BEFORE the content that follows its page-break
+     div, so Word paginates it onto the correct sheet. */
+  html = html.replace(
+    /<div[^>]*data-type="page-break"[^>]*>/gi,
+    (tag) => {
+      const kindM = /data-kind="([^"]*)"/.exec(tag);
+      const kind = kindM ? kindM[1] : '';
+      const coverM = /data-cover="([^"]*)"/.exec(tag);
+      let cover: { coverSrc?: string; coverFit?: string; coverTitle?: string; coverSubtitle?: string } = {};
+      if (coverM) {
+        try { cover = JSON.parse(coverM[1].replace(/&quot;/g, '"')); } catch { cover = {}; }
+      }
+      if (kind !== 'cover' && kind !== 'toc') return tag;
+      if (kind === 'toc') {
+        return tag + WORD_TOC_ISLAND;
+      }
+      const img = cover.coverSrc
+        ? `<img src="${cover.coverSrc}" style="position:absolute;top:0;left:0;width:794px;height:1123px;object-fit:${cover.coverFit === 'contain' ? 'contain' : 'cover'}"/>`
+        : `<div style="position:absolute;top:0;left:0;width:794px;height:1123px;background:linear-gradient(to bottom,#fafafa,#ffffff)"/>`;
+      const band = (cover.coverTitle || cover.coverSubtitle)
+        ? `<div style="position:absolute;top:1010px;left:0;width:794px;text-align:center">`
+          + (cover.coverTitle ? `<span style="background:#00000099;color:#fff;font-weight:800;font-size:24pt;padding:6pt 14pt;border-radius:8pt">${cover.coverTitle}</span>` : '')
+          + (cover.coverSubtitle ? ` <span style="background:#00000073;color:#e5e5e5;font-size:11pt;padding:4pt 10pt;border-radius:6pt">${cover.coverSubtitle}</span>` : '')
+          + `</div>`
+        : '';
+      return tag + `<div style="position:relative;width:794px;height:1123px;overflow:hidden">${img}${band}</div><div style="mso-element:pagebreak-before;page-break-before:always"></div>`;
+    },
+  );
 
   /* display equations: <div data-type="equation" …>SOURCE</div> */
   html = html.replace(

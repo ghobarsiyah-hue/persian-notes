@@ -132,6 +132,12 @@
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
+/* Canva-style side panel — rolls in from the left edge */
+@keyframes pn-side-in {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
 @keyframes pn-dock-in {
   from { transform: translateX(-24px); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
@@ -347,16 +353,34 @@
 }
 .ProseMirror table td,
 .ProseMirror table th {
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  /* رنگ گرید — بنفش ملایم سیستم (قابل تغییر با data-grid از تب جدول) */
+  border: 1px solid #b9a7e0;
   padding: 8px 12px;
   vertical-align: top;
   position: relative;
   background: transparent; /* surface comes from the table (see above) */
 }
+/* رنگ خطوط بین سلول‌ها — data-grid از گره جدول (رنگ مستقیم یا کلمه کلیدی).
+   Specificity MUST beat the data-tstyle template rules below (they come
+   later in this file at equal specificity, which used to override the
+   grid color on every preset table). data-tstyle + data-grid → the grid
+   color wins; a tstyle may only supply the color when gridColor is unset. */
+.ProseMirror table[data-grid] td,
+.ProseMirror table[data-grid] th { border-color: var(--pn-grid, #b9a7e0); }
+.ProseMirror table[data-tstyle][data-grid] td,
+.ProseMirror table[data-tstyle][data-grid] th { border-color: var(--pn-grid, #b9a7e0); }
+.ProseMirror table[data-tstyle][data-grid='none'] td,
+.ProseMirror table[data-tstyle][data-grid='none'] th { border-color: transparent; }
+.ProseMirror table[data-grid='none'] td,
+.ProseMirror table[data-grid='none'] th { border-color: transparent; }
 .dark .ProseMirror table td,
 .dark .ProseMirror table th {
-  border-color: rgba(255, 255, 255, 0.08);
+  border-color: rgba(167, 139, 250, 0.45);
 }
+.dark .ProseMirror table[data-grid] td,
+.dark .ProseMirror table[data-grid] th { border-color: var(--pn-grid, rgba(167, 139, 250, 0.45)); }
+.dark .ProseMirror table[data-grid='none'] td,
+.dark .ProseMirror table[data-grid='none'] th { border-color: transparent; }
 .ProseMirror table th {
   background: #fafafa;
   color: #171717;
@@ -365,7 +389,10 @@
 }
 .dark .ProseMirror table th { background: #1a1a1a; color: #ededed; }
 
-/* ── table design (طراحی جدول) — data-attrs set from the contextual tab ──
+/* NOTE: attr() with type(<color>) is CSS Values 4 and not reliably
+   supported in the print pipeline — the NodeView writes the resolved
+   color as an inline CSS custom property instead (style="--pn-grid:…"),
+   which every target (editor, print clone, PDF) understands natively. */
    The SAME rules live in printCss (print/PDF) and are baked inline by the
    Word exporter, so a designed table renders identically everywhere. */
 .ProseMirror table[data-cellpad='compact'] td,
@@ -881,6 +908,29 @@
 .edu-mcq[data-qv="v12"] .quiz-opt[data-correct="true"] .quiz-opt-num { color: #16a34a; }
 .dark .edu-mcq[data-qv="v12"] .quiz-opt-num { color: var(--q-accent, #6cb2ff); }
 
+/* ── variant coverage for تشریحی/سوال کوتاه (v4/v6/v8/v11) — the same
+   designs every family shares, expressed for the text-answer blocks ── */
+.edu-longanswer[data-qv="v4"],
+.edu-question[data-qv="v4"] { box-shadow: none; border-right-color: transparent; background: rgba(0, 0, 0, 0.02); }
+.dark .edu-longanswer[data-qv="v4"],
+.dark .edu-question[data-qv="v4"] { background: rgba(255, 255, 255, 0.03); }
+.edu-longanswer[data-qv="v6"] { border-radius: 14px; }
+.edu-question[data-qv="v6"] { border-radius: 14px; }
+.edu-longanswer[data-qv="v8"],
+.edu-question[data-qv="v8"] { border-right: 3px solid var(--q-accent, #0070f3); border-radius: 4px; }
+.edu-longanswer[data-qv="v8"] .edu-title,
+.edu-question[data-qv="v8"] .edu-title { color: var(--q-accent, #0070f3); }
+.edu-longanswer[data-qv="v11"] .edu-body > p,
+.edu-question[data-qv="v11"] .edu-body > p {
+  border-bottom: 1px dotted rgba(0, 0, 0, 0.2);
+}
+.dark .edu-longanswer[data-qv="v11"] .edu-body > p,
+.dark .edu-question[data-qv="v11"] .edu-body > p { border-bottom-color: rgba(255, 255, 255, 0.16); }
+/* TF completions — v5 title rule + v8 side bar + v11 outline buttons */
+.edu-truefalse[data-qv="v8"] .edu-title { color: var(--q-accent, #0070f3); }
+.dark .edu-truefalse[data-qv="v8"] .quiz-tf-btn { border-right-color: rgba(50, 145, 255, 0.5); }
+.edu-truefalse[data-qv="v11"] .quiz-tf-btn { padding: 5px 18px; }
+
 /* ── per-block option tuning (data-chip / data-gap / --q-accent) ── */
 .edu-mcq[data-chip="square"] .quiz-opt-num,
 .edu-truefalse[data-chip="square"] .quiz-tf-btn { border-radius: 4px; }
@@ -1383,6 +1433,65 @@
    A4 sheet edges — only a small ≈10mm writing-safe margin is kept. */
 .page-blank {
   padding: 38px 38px;
+}
+
+/* ── Cover page (جلد — item 15) ────────────────────────────────────
+   Full-bleed artwork layer under the (empty) editor; the writing area is
+   intentionally minimal so the cover looks like a cover. */
+.page-cover {
+  padding: 38px 38px;
+}
+.page-cover-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  overflow: hidden;
+}
+.page-cover-layer img { user-select: none; }
+
+/* ── TOC page (فهرست مطالب — item 15) ──────────────────────────────
+   Heading + ruled dotted rows (title … page number), drawn edge-to-edge
+   inside the safe margin; rows are DECO — the user types in the normal
+   editor above them, aligned by the same rhythm. */
+.page-toc { padding: 38px 38px; }
+.page-toc-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  padding: 96px 56px 56px;
+}
+.page-toc-heading {
+  text-align: center;
+  font-weight: 800;
+  font-size: 20px;
+  letter-spacing: -0.01em;
+  color: #1e3a5f;
+  border-bottom: 2.5px solid #c5a24d;
+  display: table;
+  margin: 0 auto 26px;
+  padding: 0 18px 6px;
+}
+.dark .page-toc-heading { color: #9ec3dd; }
+.page-toc-lines { display: flex; flex-direction: column; gap: 30px; }
+.page-toc-row { display: flex; align-items: baseline; gap: 8px; }
+.page-toc-title { width: 46%; border-bottom: 1px solid rgba(0, 0, 0, 0.18); }
+.page-toc-dots { flex: 1; border-bottom: 1px dotted rgba(0, 0, 0, 0.28); }
+.page-toc-num { width: 34px; text-align: center; border-bottom: 1px solid rgba(0, 0, 0, 0.18); }
+.dark .page-toc-title, .dark .page-toc-num { border-color: rgba(255, 255, 255, 0.2); }
+.dark .page-toc-dots { border-color: rgba(255, 255, 255, 0.28); }
+
+/* ── Booklet page (قالب جزوه) ───────────────────────────────────
+   Study-booklet template: the fine double frame, flourish, page-number
+   circle + waveform and the logo box are painted by BookletChrome as a
+   page-chrome SVG layer (page-border, same layer as the framed sheet's
+   ornamental frame) — the padding below is the writing-safe margin that
+   keeps content and objects inside the frame. Values DERIVED from
+   pageCapacity.BOOKLET_PADDING (34/38/34/34) — keep in sync with that one
+   contract. */
+.page-booklet {
+  padding: 34px 38px 34px 34px;
 }
 
 /* ── Notebook page (صفحه نوت‌بوکی، خط‌دار) ─────────────────────────

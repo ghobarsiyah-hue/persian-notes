@@ -13,10 +13,11 @@
  * document font settings, and the floating layers.
  */
 
-import { pageBorderSvgString } from '@/components/border/PageBorder';
+import { pageBorderSvgString, bookletSvgString } from '@/components/border/PageBorder';
+import { BOOKLET_PADDING } from '@/editor/pageCapacity';
 import { buildPrintDocument, type PaginateMeta, type PaginateResult } from './print';
 import type { FloatingElement } from '@/components/editor/FloatingLayer';
-import type { BorderSettings, PageKind } from '@/types';
+import { DEFAULT_BORDER_SETTINGS, type BorderSettings, type PageKind } from '@/types';
 
 const A4_W_MM = 210;
 const A4_H_MM = 297;
@@ -46,11 +47,15 @@ const NB_MARGIN_PX = 28;
 const K = A4_W_MM / A4_W_PX;
 
 /** per-kind sheet padding — mirrors .page-paper/.page-blank/.page-notebook,
- *  emitted in mmpx so the paddings scale with the sheet exactly */
+ *  emitted in mmpx so the paddings scale with the sheet exactly.
+ *  cover/toc use the blank-sheet margin (item 15). */
 const PAD_OF: Record<PageKind, string> = {
   framed: `${mmpx(30)} ${mmpx(32)}`,
   blank: mmpx(38),
   notebook: mmpx(38),
+  cover: mmpx(38),
+  toc: mmpx(38),
+  booklet: `${mmpx(BOOKLET_PADDING.top)} ${mmpx(BOOKLET_PADDING.right)} ${mmpx(BOOKLET_PADDING.bottom)} ${mmpx(BOOKLET_PADDING.left)}`, /* خیلی سبز — derived from pageCapacity.BOOKLET_PADDING (34/38/34/34) */
 };
 
 /** One application page snapshot handed to the exporter by the editor. */
@@ -62,6 +67,13 @@ export interface ExportPage {
   floatingElements?: FloatingElement[];
   /** visual kind: blank → no frame, notebook → ruled sheet (default: framed) */
   kind?: PageKind;
+  /** item 15: cover metadata (src/fit/title) when kind === 'cover' */
+  cover?: {
+    coverSrc?: string;
+    coverFit?: 'cover' | 'contain';
+    coverTitle?: string;
+    coverSubtitle?: string;
+  };
 }
 
 export type ExportMeta = PaginateMeta;
@@ -322,18 +334,56 @@ export function buildPagesHtml(
     .map((page, i) => {
       const kind: PageKind = page.kind ?? 'framed';
       /* the decorative border (with its page numbers) only exists on framed
-         sheets — blank/notebook pages have none, exactly like the editor */
-      const borderSvg = kind !== 'framed'
-        ? ''
-        : options.border
-          ? pageBorderSvgString(options.border, meta.subject, meta.chapter, i + 1, total, meta.title)
+         sheets — blank/notebook/cover/toc pages have none, exactly like the
+         editor */
+      /* the decorative border (with its page numbers) only exists on framed
+         sheets — blank/notebook/cover/toc pages have none, exactly like the
+         editor. booklet (قالب جزوه) renders ITS OWN chrome SVG instead,
+         with the same real page index (i+1) as the framed tab. */
+      const borderSvg = kind === 'framed'
+        ? (options.border ? pageBorderSvgString(options.border, meta.subject, meta.chapter, i + 1, total, meta.title) : '')
+        : kind === 'booklet'
+          ? bookletSvgString(options.border ?? DEFAULT_BORDER_SETTINGS, i + 1)
           : '';
       const notebookSvg = kind === 'notebook' ? notebookLinesSvg(options.fontSize, options.lineHeight) : '';
+      /* item 15: cover artwork + title band, identical geometry to the editor
+         layer (.page-cover-layer) — emitted inline so the PDF matches 1:1 */
+      const coverLayer = kind === 'cover'
+        ? (() => {
+            const c = page.cover ?? {};
+            const img = c.coverSrc
+              ? `<img src="${c.coverSrc}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:${c.coverFit === 'contain' ? 'contain' : 'cover'}"/>`
+              : '<div style="position:absolute;inset:0;background:linear-gradient(to bottom,#fafafa,#ffffff)"/>';
+            const band = (c.coverTitle || c.coverSubtitle)
+              ? `<div style="position:absolute;left:0;right:0;bottom:56px;display:flex;flex-direction:column;align-items:center;gap:4px;padding:0 40px;text-align:center">`
+                + (c.coverTitle ? `<span style="max-width:100%;background:rgba(0,0,0,0.6);color:#fff;font-weight:800;font-size:24px;padding:6px 16px;border-radius:8px">${escape(c.coverTitle)}</span>` : '')
+                + (c.coverSubtitle ? `<span style="max-width:100%;background:rgba(0,0,0,0.45);color:rgba(255,255,255,0.9);font-size:14px;padding:4px 12px;border-radius:6px">${escape(c.coverSubtitle)}</span>` : '')
+                + '</div>'
+              : '';
+            return `<div class="pn-cover-layer" style="position:absolute;inset:0;z-index:1;pointer-events:none;overflow:hidden">${img}${band}</div>`;
+          })()
+        : '';
+      const tocLayer = kind === 'toc'
+        ? (() => {
+            const rows = Array.from({ length: 22 }, (_, r) =>
+              `<div style="display:flex;align-items:baseline;gap:8px">`
+              + `<span style="width:46%;border-bottom:1px solid rgba(0,0,0,0.18)"></span>`
+              + `<span style="flex:1;border-bottom:1px dotted rgba(0,0,0,0.28)"></span>`
+              + `<span style="width:34px;text-align:center;border-bottom:1px solid rgba(0,0,0,0.18)"></span>`
+              + `</div>`).join('');
+            return `<div style="position:absolute;inset:0;z-index:1;pointer-events:none;padding:96px 56px 56px">`
+              + `<div style="text-align:center;font-weight:800;font-size:20px;color:#1e3a5f;border-bottom:2.5px solid #c5a24d;display:table;margin:0 auto 26px;padding:0 18px 6px">فهرست مطالب</div>`
+              + `<div style="display:flex;flex-direction:column;gap:30px">${rows}</div>`
+              + `</div>`;
+          })()
+        : '';
       const floats = floatingElementsHtml(page.floatingElements, i, total, kind);
       return `<section class="pn-page" data-page="${i + 1}">
   <div class="pn-sheet">
   ${borderSvg}
   ${notebookSvg}
+  ${coverLayer}
+  ${tocLayer}
   <div class="pn-sheet-content" style="padding:${PAD_OF[kind]};font-size:${options.fontSize}px;line-height:${options.lineHeight}">${page.html}</div>
   ${floats}
   </div>

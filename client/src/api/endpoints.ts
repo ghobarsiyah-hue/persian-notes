@@ -169,9 +169,9 @@ async function apiBlob(path: string, body: unknown): Promise<Blob> {
 export const groupsApi = {
   list: () => api<{ groups: Group[] }>('/groups'),
   get: (groupId: string) => api<{ group: Group }>(`/groups/${groupId}`),
-  create: (data: { name: string; description?: string; avatar?: string | null }) =>
+  create: (data: { name: string; description?: string; avatar?: string | null; accentColor?: string | null }) =>
     api<{ group: Group }>('/groups', { method: 'POST', body: data }),
-  update: (groupId: string, data: { name?: string; description?: string; avatar?: string | null }) =>
+  update: (groupId: string, data: { name?: string; description?: string; avatar?: string | null; accentColor?: string | null; joinPolicy?: 'invite' | 'open'; contentPolicy?: 'members' | 'public' }) =>
     api<{ group: Group }>(`/groups/${groupId}`, { method: 'PATCH', body: data }),
   remove: (groupId: string) => api<{ ok: boolean }>(`/groups/${groupId}`, { method: 'DELETE' }),
   members: (groupId: string) => api<{ members: GroupMember[] }>(`/groups/${groupId}/members`),

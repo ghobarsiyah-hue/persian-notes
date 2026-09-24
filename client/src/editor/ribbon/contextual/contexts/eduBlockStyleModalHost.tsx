@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { Modal, Button } from '@/components/ui';
+import { SidePanel, Button } from '@/components/ui';
 import type { Editor } from '@tiptap/core';
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -143,7 +143,7 @@ function readState(editor: Editor): StyleState | null {
     qAccent: (a.qAccent as string) || '',
     qChip: (a.qChip as string) || '',
     qGap: (a.qGap as string) || '',
-    qVariant: a.qVariant === 'v2' || a.qVariant === 'v3' ? (a.qVariant as string) : 'v1',
+    qVariant: typeof a.qVariant === 'string' && /^v(?:1[0-2]|[1-9])$/.test(a.qVariant) ? (a.qVariant as string) : 'v1',
     answerAt: a.answerAt === 'end' || a.answerAt === 'none' ? (a.answerAt as string) : 'mark',
     showAnswer: a.showAnswer !== false,
     bodyText,
@@ -219,9 +219,9 @@ function EduBlockStyleModalInner({ editor, state, onClose }: {
         styleBorderStyle: s.styleBorderStyle,
         styleRadius: s.styleRadius,
         styleTitle: s.styleTitle,
-        ...(QUIZ_STYLEABLE.has(s.nodeType) ? { qVariant: s.qVariant, answerAt: s.answerAt, showAnswer: s.answerAt !== 'none', points: Math.max(0, Number(s.points) || 0) } : {}),
-        ...(s.nodeType === 'mcqBlock' ? { layout: s.mcqLayout === 'grid' ? 'grid' : 'stacked' } : {}),
-        ...(QUIZ_STYLEABLE.has(s.nodeType) ? { qAccent: s.qAccent, qChip: s.qChip, qGap: s.qGap } : {}),
+        /* quiz attrs ride along UNCHANGED (not authored here — the question
+           modal owns them); keeping them in the patch preserves a variant
+           picked earlier instead of silently resetting it */
       }));
       onClose({ commit: true, live: s });
     } catch {
@@ -237,8 +237,8 @@ function EduBlockStyleModalInner({ editor, state, onClose }: {
   const requestClose = (commit: boolean) => onClose({ commit, live: s });
 
   return (
-    <Modal open onClose={() => requestClose(false)} title="شخصی‌سازی کادر" wide>
-      <div className="grid gap-5 md:grid-cols-[1fr_280px]">
+    <SidePanel open onClose={() => requestClose(false)} title="شخصی‌سازی کادر">
+      <div className="grid gap-5 md:grid-cols-[1fr_260px]">
         <div className="space-y-4">
           {/* ── متن ── */}
           <section className="rounded-lg border border-ink-200 p-3 dark:border-ink-700">
@@ -270,122 +270,10 @@ function EduBlockStyleModalInner({ editor, state, onClose }: {
             </div>
           </section>
 
-          {/* ── قالب و پاسخ — only quiz families ── */}
-          {QUIZ_STYLEABLE.has(s.nodeType) && (
-            <section className="rounded-lg border border-ink-200 p-3 dark:border-ink-700">
-              <h3 className="mb-2.5 text-[13px] font-bold text-ink-900 dark:text-ink-100">قالب و پاسخ</h3>
-              <div className="space-y-3">
-                <div>
-                  <span className="mb-1 block text-[12px] font-medium text-ink-600 dark:text-ink-400">قالب سوال</span>
-<div className="grid grid-cols-4 gap-1.5">
-                    {QUIZ_VARIANTS.map((v) => (
-                      <button
-                        key={v.v}
-                        type="button"
-                        title={v.desc}
-                        onClick={() => patch({ qVariant: v.v })}
-                        className={`h-8 flex-1 rounded-md border text-[11.5px] transition-colors ${
-                          s.qVariant === v.v
-                            ? 'border-[#0070f3] bg-accent-50 font-semibold text-accent-700 dark:bg-accent-900/30 dark:text-accent-300'
-                            : 'border-ink-200 text-ink-500 dark:border-ink-700'
-                        }`}
-                      >
-                        {v.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <span className="mb-1 block text-[12px] font-medium text-ink-600 dark:text-ink-400">نمره سوال</span>
-                    <input
-                      type="number"
-                      min={0}
-                      step={0.25}
-                      inputMode="decimal"
-                      dir="ltr"
-                      value={s.points}
-                      onChange={(e) => patch({ points: e.target.value })}
-                      placeholder="بدون نمره"
-                      className="h-8 w-full rounded-md border border-ink-200 bg-transparent px-2 text-[12.5px] text-ink-900 outline-none transition-colors placeholder:text-ink-300 focus:border-[#0070f3] dark:border-ink-700 dark:text-ink-100 dark:placeholder:text-ink-600"
-                    />
-                  </div>
-                  {s.nodeType === 'mcqBlock' && (
-                    <div>
-                      <span className="mb-1 block text-[12px] font-medium text-ink-600 dark:text-ink-400">چیدمان گزینه‌ها</span>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        <button type="button" onClick={() => patch({ mcqLayout: 'stacked' })}
-                          className={`h-8 rounded-md border text-[11.5px] transition-colors ${s.mcqLayout === 'stacked' ? 'border-[#0070f3] bg-accent-50 font-semibold text-accent-700 dark:bg-accent-900/30 dark:text-accent-300' : 'border-ink-200 text-ink-500 dark:border-ink-700'}`}>
-                          ۴ زیر هم
-                        </button>
-                        <button type="button" onClick={() => patch({ mcqLayout: 'grid' })}
-                          className={`h-8 rounded-md border text-[11.5px] transition-colors ${s.mcqLayout === 'grid' ? 'border-[#0070f3] bg-accent-50 font-semibold text-accent-700 dark:bg-accent-900/30 dark:text-accent-300' : 'border-ink-200 text-ink-500 dark:border-ink-700'}`}>
-                          ۲×۲
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                <div className="space-y-3">
-                  <div>
-                    <span className="mb-1 block text-[12px] font-medium text-ink-600 dark:text-ink-400">رنگ اکسان سوال (چیپ‌ها و خطوط)</span>
-                    <Swatches value={s.qAccent} colors={TITLE_PALETTE} defaultLabel="رنگ قالب" onPick={(c) => patch({ qAccent: c })} />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <span className="mb-1 block text-[12px] font-medium text-ink-600 dark:text-ink-400">شکل شماره گزینه</span>
-                      <div className="grid grid-cols-4 gap-1.5">
-                        {([['', 'قالب'], ['circle', 'دایره'], ['square', 'مربع'], ['none', 'حاشیه‌دار']] as Array<[string, string]>).map(([cv, cl]) => (
-                          <button key={cv} type="button" onClick={() => patch({ qChip: cv })}
-                            className={`h-8 rounded-md border text-[11.5px] transition-colors ${s.qChip === cv ? 'border-[#0070f3] bg-accent-50 font-semibold text-accent-700 dark:bg-accent-900/30 dark:text-accent-300' : 'border-ink-200 text-ink-500 dark:border-ink-700'}`}>
-                            {cl}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <span className="mb-1 block text-[12px] font-medium text-ink-600 dark:text-ink-400">فاصله گزینه‌ها</span>
-                      <div className="grid grid-cols-3 gap-1.5">
-                        {([['', 'معمولی'], ['tight', 'فشرده'], ['wide', 'باز']] as Array<[string, string]>).map(([gv, gl]) => (
-                          <button key={gv} type="button" onClick={() => patch({ qGap: gv })}
-                            className={`h-8 rounded-md border text-[11.5px] transition-colors ${s.qGap === gv ? 'border-[#0070f3] bg-accent-50 font-semibold text-accent-700 dark:bg-accent-900/30 dark:text-accent-300' : 'border-ink-200 text-ink-500 dark:border-ink-700'}`}>
-                            {gl}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                {s.nodeType !== 'longAnswerBlock' && (
-                  <div>
-                    <span className="mb-1 block text-[12px] font-medium text-ink-600 dark:text-ink-400">جایگاه پاسخ صحیح</span>
-                    <div className="flex gap-1.5">
-                      {QUIZ_ANSWER_AT.map((d) => (
-                        <button
-                          key={d.v}
-                          type="button"
-                          title={d.desc}
-                          onClick={() => patch({ answerAt: d.v, showAnswer: d.v !== 'none' })}
-                          className={`h-8 flex-1 rounded-md border text-[11.5px] transition-colors ${
-                            s.answerAt === d.v
-                              ? 'border-[#0070f3] bg-accent-50 font-semibold text-accent-700 dark:bg-accent-900/30 dark:text-accent-300'
-                              : 'border-ink-200 text-ink-500 dark:border-ink-700'
-                          }`}
-                        >
-                          {d.label}
-                        </button>
-                      ))}
-                    </div>
-                    {s.answerAt === 'end' && (
-                      <p className="mt-1.5 text-[11px] leading-5 text-ink-500 dark:text-ink-400">
-                        پاسخ به‌صورت یک خط کوچک در «انتهای کادر» نمایش داده می‌شود — خود گزینه رنگی نمی‌شود تا جواب لو نرود.
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-            </section>
-          )}
+          {/* ── قالب و پاسخ — REMOVED: these live in the QUESTION modal
+              (شخصی‌سازی سوال). This modal is the BOX designer — title,
+              body text, border, background — shared by every block family
+              without leaking quiz-only controls into it. ── */}
 
           {/* ── بوردر ── */}
           <section className="rounded-lg border border-ink-200 p-3 dark:border-ink-700">
@@ -482,7 +370,7 @@ function EduBlockStyleModalInner({ editor, state, onClose }: {
         <Button variant="secondary" onClick={() => requestClose(false)}>انصراف</Button>
         <Button onClick={apply}>اعمال</Button>
       </div>
-    </Modal>
+    </SidePanel>
   );
 }
 
@@ -538,6 +426,228 @@ export function openEduBlockStyleModal(editor: Editor) {
       onClose={() => close()}
     />,
   );
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   شخصی‌سازی سوال — the QUESTION modal (quiz families ONLY).
+
+   Split from the box modal (item: «شخصی سازی کادرها آپشناش باید جوری باشه
+   که رو کادرای سوالی اعمال نشه»): the box modal keeps title/body/border/
+   background; THIS modal owns everything question-specific — the 12
+   ready-made variants (with live mini-samples), نقاط, MCQ layout, accent,
+   chip shape, option spacing, answer placement. Every control maps 1:1 to
+   a persisted node attr via setNodeMarkup (undoable + exported).
+   ════════════════════════════════════════════════════════════════════════ */
+
+interface QuestionStyleState {
+  qVariant: string;
+  answerAt: string;
+  showAnswer: boolean;
+  points: string;
+  mcqLayout: string;
+  qAccent: string;
+  qChip: string;
+  qGap: string;
+  nodePos: number;
+  nodeType: string;
+}
+
+/** live mini-sample of one variant — same markup/CSS as the ribbon picker */
+function VariantSample({ v }: { v: string }) {
+  return (
+    <span aria-hidden className="vsample" data-qv={v}>
+      <span className="vsample-title" />
+      <span className="vsample-row"><span className="vsample-num" /><span className="vsample-line w1" /></span>
+      <span className="vsample-row"><span className="vsample-num" /><span className="vsample-line w2" /></span>
+    </span>
+  );
+}
+
+function readQuestionState(editor: Editor): QuestionStyleState | null {
+  const hit = findEduNode(editor);
+  if (!hit || !QUIZ_STYLEABLE.has(hit.type)) return null;
+  const node = editor.state.doc.nodeAt(hit.pos);
+  if (!node) return null;
+  const a = node.attrs as Record<string, unknown>;
+  return {
+    qVariant: typeof a.qVariant === 'string' && /^v(?:1[0-2]|[1-9])$/.test(a.qVariant) ? (a.qVariant as string) : 'v1',
+    answerAt: a.answerAt === 'end' || a.answerAt === 'none' ? (a.answerAt as string) : 'mark',
+    showAnswer: a.showAnswer !== false,
+    points: a.points === undefined || a.points === null ? '' : String(a.points),
+    mcqLayout: a.layout === 'grid' ? 'grid' : 'stacked',
+    qAccent: (a.qAccent as string) || '',
+    qChip: (a.qChip as string) || '',
+    qGap: (a.qGap as string) || '',
+    nodePos: hit.pos,
+    nodeType: hit.type,
+  };
+}
+
+function QuestionStyleModalInner({ editor, state, onClose }: {
+  editor: Editor; state: QuestionStyleState; onClose: () => void;
+}) {
+  const [s, setS] = useState<QuestionStyleState>(state);
+  const patch = (p: Partial<QuestionStyleState>) => setS((prev) => ({ ...prev, ...p }));
+
+  const apply = () => {
+    try {
+      const node = editor.state.doc.nodeAt(s.nodePos);
+      if (!node) { onClose(); return; }
+      editor.view.dispatch(editor.state.tr.setNodeMarkup(s.nodePos, undefined, {
+        ...node.attrs,
+        qVariant: s.qVariant,
+        answerAt: s.answerAt,
+        showAnswer: s.answerAt !== 'none',
+        points: Math.max(0, Number(s.points) || 0),
+        qAccent: s.qAccent,
+        qChip: s.qChip,
+        qGap: s.qGap,
+        ...(s.nodeType === 'mcqBlock' ? { layout: s.mcqLayout === 'grid' ? 'grid' : 'stacked' } : {}),
+      }));
+      onClose();
+    } catch {
+      onClose();
+    }
+  };
+
+  return (
+    <SidePanel open onClose={onClose} title="شخصی‌سازی سوال">
+      <div className="space-y-4">
+        {/* قالب — ۱۲ طرح آماده با سمپل زنده */}
+        <section>
+          <span className="mb-1.5 block text-[12px] font-medium text-ink-600 dark:text-ink-400">قالب سوال</span>
+          <div className="grid grid-cols-2 gap-1 rounded-lg border border-ink-200 p-1.5 dark:border-ink-700">
+            {QUIZ_VARIANTS.map((v) => (
+              <button
+                key={v.v}
+                type="button"
+                title={v.desc}
+                onClick={() => patch({ qVariant: v.v })}
+                className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] transition-colors ${
+                  s.qVariant === v.v
+                    ? 'bg-accent-50 font-semibold text-accent-700 dark:bg-accent-900/30 dark:text-accent-300'
+                    : 'text-ink-700 hover:bg-ink-100 dark:text-ink-200 dark:hover:bg-ink-800'
+                }`}
+              >
+                <VariantSample v={v.v} />
+                <span className="flex flex-col items-start leading-tight">
+                  {v.label}
+                  <span className="text-[10px] font-normal text-ink-400">{v.desc}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* نمره + چیدمان */}
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block">
+            <span className="mb-1 block text-[12px] font-medium text-ink-600 dark:text-ink-400">نمره سوال</span>
+            <input
+              type="number"
+              min={0}
+              step={0.25}
+              inputMode="decimal"
+              dir="ltr"
+              value={s.points}
+              onChange={(e) => patch({ points: e.target.value })}
+              placeholder="بدون نمره"
+              className="h-9 w-full rounded-lg border border-ink-200 bg-white px-3 text-sm outline-none transition-colors placeholder:text-ink-300 focus:border-[#0070f3] dark:border-ink-700 dark:bg-ink-900 dark:text-ink-100"
+            />
+          </label>
+          {s.nodeType === 'mcqBlock' && (
+            <div>
+              <span className="mb-1 block text-[12px] font-medium text-ink-600 dark:text-ink-400">چیدمان گزینه‌ها</span>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button type="button" onClick={() => patch({ mcqLayout: 'stacked' })}
+                  className={`h-9 rounded-lg border text-[12px] transition-colors ${s.mcqLayout === 'stacked' ? 'border-[#0070f3] bg-accent-50 font-semibold text-accent-700 dark:bg-accent-900/30 dark:text-accent-300' : 'border-ink-200 text-ink-500 dark:border-ink-700'}`}>
+                  ۴ زیر هم
+                </button>
+                <button type="button" onClick={() => patch({ mcqLayout: 'grid' })}
+                  className={`h-9 rounded-lg border text-[12px] transition-colors ${s.mcqLayout === 'grid' ? 'border-[#0070f3] bg-accent-50 font-semibold text-accent-700 dark:bg-accent-900/30 dark:text-accent-300' : 'border-ink-200 text-ink-500 dark:border-ink-700'}`}>
+                  ۲×۲
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* اکسان + چیپ + فاصله */}
+        <section>
+          <span className="mb-1 block text-[12px] font-medium text-ink-600 dark:text-ink-400">رنگ اکسان سوال (چیپ‌ها و خطوط)</span>
+          <Swatches value={s.qAccent} colors={TITLE_PALETTE} defaultLabel="رنگ قالب" onPick={(c) => patch({ qAccent: c })} />
+        </section>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <span className="mb-1 block text-[12px] font-medium text-ink-600 dark:text-ink-400">شکل شماره گزینه</span>
+            <div className="grid grid-cols-4 gap-1.5">
+              {([['', 'قالب'], ['circle', 'دایره'], ['square', 'مربع'], ['none', 'حاشیه‌دار']] as Array<[string, string]>).map(([cv, cl]) => (
+                <button key={cv} type="button" onClick={() => patch({ qChip: cv })}
+                  className={`h-8 rounded-md border text-[11.5px] transition-colors ${s.qChip === cv ? 'border-[#0070f3] bg-accent-50 font-semibold text-accent-700 dark:bg-accent-900/30 dark:text-accent-300' : 'border-ink-200 text-ink-500 dark:border-ink-700'}`}>
+                  {cl}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <span className="mb-1 block text-[12px] font-medium text-ink-600 dark:text-ink-400">فاصله گزینه‌ها</span>
+            <div className="grid grid-cols-3 gap-1.5">
+              {([['', 'معمولی'], ['tight', 'فشرده'], ['wide', 'باز']] as Array<[string, string]>).map(([gv, gl]) => (
+                <button key={gv} type="button" onClick={() => patch({ qGap: gv })}
+                  className={`h-8 rounded-md border text-[11.5px] transition-colors ${s.qGap === gv ? 'border-[#0070f3] bg-accent-50 font-semibold text-accent-700 dark:bg-accent-900/30 dark:text-accent-300' : 'border-ink-200 text-ink-500 dark:border-ink-700'}`}>
+                  {gl}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* جایگاه پاسخ — MCQ + TF only */}
+        {s.nodeType !== 'longAnswerBlock' && (
+          <section>
+            <span className="mb-1 block text-[12px] font-medium text-ink-600 dark:text-ink-400">جایگاه پاسخ صحیح</span>
+            <div className="flex gap-1.5">
+              {QUIZ_ANSWER_AT.map((d) => (
+                <button
+                  key={d.v}
+                  type="button"
+                  title={d.desc}
+                  onClick={() => patch({ answerAt: d.v, showAnswer: d.v !== 'none' })}
+                  className={`h-8 flex-1 rounded-md border text-[11.5px] transition-colors ${
+                    s.answerAt === d.v
+                      ? 'border-[#0070f3] bg-accent-50 font-semibold text-accent-700 dark:bg-accent-900/30 dark:text-accent-300'
+                      : 'border-ink-200 text-ink-500 dark:border-ink-700'
+                  }`}
+                >
+                  {d.label}
+                </button>
+              ))}
+            </div>
+            {s.answerAt === 'end' && (
+              <p className="mt-1.5 text-[11px] leading-5 text-ink-500 dark:text-ink-400">
+                پاسخ به‌صورت یک خط کوچک در «انتهای کادر» نمایش داده می‌شود — خود گزینه رنگی نمی‌شود تا جواب لو نرود.
+              </p>
+            )}
+          </section>
+        )}
+      </div>
+
+      <div className="mt-5 flex justify-end gap-2.5 border-t border-ink-100 pt-4 dark:border-ink-800">
+        <Button variant="secondary" onClick={onClose}>انصراف</Button>
+        <Button onClick={apply}>اعمال</Button>
+      </div>
+    </SidePanel>
+  );
+}
+
+/** open the QUESTION modal — no-op unless the selection resolves to one of
+ *  the four quiz families (check the CALLER side for graceful fallback) */
+export function openEduQuestionStyleModal(editor: Editor) {
+  const state = readQuestionState(editor);
+  if (!state) return false;
+  const { root } = ensureHost();
+  root.render(<QuestionStyleModalInner editor={editor} state={state} onClose={() => root.render(null)} />);
+  return true;
 }
 
 /** wrapper so the modal can persist text edits on اعمال */

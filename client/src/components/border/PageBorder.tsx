@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { BorderSettings } from '@/types';
 import { faDigits } from '@/utils/fa';
@@ -207,6 +207,11 @@ interface BorderArt {
   /** 'ornate' style: diamond ornaments on the four frame corners */
   cornerDots: Array<{ x: number; y: number; c1: string; c2: string }>;
   sideText: { label: string; x: number; y: number } | null;
+  /** ── item 16: top-left header slot ── a notch cut in the TOP edge near
+   *  the left corner plus the lesson/chapter label resting inside it. The
+   *  user types the subject there (قالب tab → «سربرگ درس»); empty label =
+   *  no notch, the frame stays continuous. */
+  headerSlot: { x: number; y: number; w: number; label: string } | null;
   /** bottom-center wavy dome holding the auto page number */
   pageTab: {
     cx: number;
@@ -309,6 +314,53 @@ function buildBorderArt(
       : [bottomEdge(leftX, rightX)]),
   ];
 
+  /* ── item 16: top-left header slot ──
+     A shallow notch in the TOP edge near the left corner (same slicing trick
+     as the page-number dome: one continuous wave, two phases) hosting the
+     lesson/chapter label. v2 — user feedback: the previous 300-unit slot +
+     30-unit hanging well fought the frame's rhythm and ate both width and
+     height. Now: a COMPACT 210-unit notch and the text sits ON the frame
+     line itself (no hanging well, no extra depth below the border) — the
+     frame's own thickness is the only vertical cost. */
+  const headerLabel = (settings.headerLabel ?? '').trim();
+  /* v3 — user feedback: the fixed 210-unit notch ate page width even for short
+     labels, the label hung BELOW the frame line, and the gold hairline under it
+     landed exactly on the content's top padding (overflowing the first line).
+     Now: the notch hugs the label (width ∝ text), the text is vertically
+     CENTERED ON the frame band, and nothing is drawn under it — the only
+     footprint is the band the frame lines already occupy. */
+  const slotLabel = headerLabel.length > 18 ? `${headerLabel.slice(0, 18)}…` : headerLabel;
+  const slotW = Math.min(320, Math.max(130, Math.round(slotLabel.length * 9) + 34));
+  const slotXa = leftX + 20;
+  const slotXb = slotXa + slotW;
+  const topParts = edgeParts(leftX, topY, rightX, topY, 0.3, 2.1, 7.1, 0, 4);
+  const topEdgeSliced = (xa: number, xb: number): EdgeGeom => ({
+    fillPath: wavyFill(sliceX(topParts.fo, xa, xb), sliceX(topParts.fi, xa, xb)),
+    fillColor: fillColor,
+    strokes: [
+      { path: sliceX(topParts.outer, xa, xb).path, color: secondary, width: OUTER_W * th, opacity: 1 },
+      { path: sliceX(topParts.inner, xa, xb).path, color: primary, width: INNER_W * th, opacity: 1 },
+      ...(style === 'ornate' ? [{ path: sliceX(topParts.extra, xa, xb).path, color: primary, width: EXTRA_W * th, opacity: 0.85 }] : []),
+    ],
+  });
+  let headerSlot: BorderArt['headerSlot'] = null;
+  if (headerLabel) {
+    /* swap the continuous top edge for two phases around the notch */
+    const topIdx = edges.findIndex((e) => e === edges[3]);
+    if (topIdx >= 0) {
+      edges[topIdx] = topEdgeSliced(slotXb, rightX);
+      edges.splice(topIdx, 0, topEdgeSliced(leftX, slotXa));
+    }
+    /* the label rides ON the top edge: baseline such that the text's optical
+       center sits on the wavy band (topY) — no dip, no rule, no depth */
+    headerSlot = {
+      x: slotXa,
+      y: topY - 2,
+      w: slotW,
+      label: slotLabel,
+    };
+  }
+
   /* ── style-specific extras (silhouette-visible, unlike the old 4px extra) ──
      'double' → a second thin frame inset ~14 units (≈10px) INSIDE the main
                 one, drawn line-only so the fill band never leaks onto it.
@@ -370,7 +422,7 @@ function buildBorderArt(
 
   if (fillColor !== null) for (const e of edges) e.fillColor = fillColor;
 
-  return { edges, innerFrame, cornerDots, sideText, pageTab };
+  return { edges, innerFrame, cornerDots, sideText, pageTab, headerSlot };
 }
 
 /**
@@ -393,6 +445,21 @@ function borderSvgInner(art: BorderArt): string {
 
   const sideText = art.sideText
     ? `<text x="${art.sideText.x}" y="${art.sideText.y}" text-anchor="middle" fill="${DEFAULT_NAVY}" font-size="14" font-family="'Sahel', Tahoma, sans-serif" font-weight="700" opacity="0.85" transform="rotate(-90, ${art.sideText.x}, ${art.sideText.y})" letter-spacing="0.05em">${escapeXml(art.sideText.label)}</text>`
+    : '';
+
+  /* item 16: top-left header slot — label centered ON the frame band inside
+     the notch (baseline = band center + half x-height), NO rule underneath:
+     zero footprint beyond the band the frame lines already occupy. */
+  const headerSlot = art.headerSlot
+    ? (() => {
+        const { x, y, w, label } = art.headerSlot;
+        /* v4 — raised 2px: the text rides ON the band's upper line rather
+           than dipping toward the lower one (user feedback: «متن پایین‌تر
+           از خطوط قاب است»). Baseline = band center − half x-height. */
+        return (
+          `<text x="${x + w / 2}" y="${y + 7}" text-anchor="middle" fill="${DEFAULT_NAVY}" font-size="13" font-family="'Sahel', Tahoma, sans-serif" font-weight="700" opacity="0.92">${escapeXml(label)}</text>`
+        );
+      })()
     : '';
 
   const pageTab = art.pageTab
@@ -418,7 +485,7 @@ function borderSvgInner(art: BorderArt): string {
     .map((d) => `<g transform="translate(${d.x} ${d.y})"><rect x="-5" y="-5" width="10" height="10" transform="rotate(45)" fill="${d.c1}"/><rect x="-2.5" y="-2.5" width="5" height="5" transform="rotate(45)" fill="${d.c2}"/></g>`)
     .join('');
 
-  return `${edges}${innerFrame}${cornerDots}${sideText}${pageTab}`;
+  return `${edges}${innerFrame}${cornerDots}${sideText}${headerSlot}${pageTab}`;
 }
 
 /**
@@ -449,7 +516,7 @@ export function PageBorder({ settings, subject, chapter, title, pageNumber, tota
   const background = useMemo(
     () => pageBorderBackgroundStyle(settings, subject, chapter, title, pageNumber),
     // primitive deps: the settings object is re-created on every parent render
-    [settings.enabled, settings.style, settings.primaryColor, settings.secondaryColor, settings.fillColor, settings.thickness, settings.sideLabel, subject, chapter, title, pageNumber],
+    [settings.enabled, settings.style, settings.primaryColor, settings.secondaryColor, settings.fillColor, settings.thickness, settings.sideLabel, settings.headerLabel, subject, chapter, title, pageNumber],
   );
   if (!background) return null;
 
@@ -592,4 +659,356 @@ export function pageBorderVmlString(
 
 function escapeXml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/* ═════════════════════════════════════════════════════════════════════
+   Booklet page template (خیلی سبز) — kind = 'booklet'
+
+   A quiet, professional study-booklet frame inspired by a fine
+   hand-drawn reference sheet:
+     • two thin near-parallel frame lines (one fine double-ruled band)
+     • subtle decorative corners
+     • a small flourish ornament centered on the TOP edge
+     • bottom center: a circle holding the REAL page number (Persian
+       digits, faDigits — same numbering system as PageBorder's tab)
+       flanked by two tiny ornamental waveform/heartbeat strokes
+     • right mid-edge: a small tab box extending OUTSIDE the frame,
+       filled with a fine diagonal hatch, holding LogoT.png
+
+   COLOR SOURCE OF TRUTH: settings.primaryColor of the SAME
+   BorderSettings every other template uses (قالب tab → color picker).
+   secondaryColor drives the second frame line so the whole template
+   re-tints coherently through the existing color system. NO parallel
+   state, NO new picker.
+
+   GEOMETRY: pure SVG in the sheet's own viewBox (0 0 794 1123) laid over
+   the page like PageBorder — positioning is page-relative by
+   construction, so every zoom level renders identically, and the
+   floating-object bounds stay governed by pageCapacity.ts alone.
+
+   RENDERING LAYER: this is page chrome — it never enters the
+   ProseMirror document, creates no nodes/text, participates in no
+   transaction, and is aria-hidden. Same guarantees as PageBorder.
+   ═════════════════════════════════════════════════════════════════════ */
+
+/* the REAL LogoT.png — same file, no duplicate asset. The editor chrome
+   renders as an SVG background-image (SVG-as-image mode) where browsers
+   BLOCK external resource references, so the PNG must ride INSIDE the SVG
+   as a data URI. `?inline` already yields a data URI in production builds;
+   in dev it is a plain URL — then the logo is fetched and converted to a
+   data URI asynchronously (fire-and-forget: the very first booklet sheets
+   may briefly lack the logo, and re-render as soon as it lands). No
+   top-level await: the vite/es2020 build target forbids it. */
+import orn7AssetUrl from '@/assets/brand/007.png?inline';
+import { A4_W_PX, A4_H_PX, BOOKLET_GEOMETRY, BOOKLET_INNER_INSET } from '@/editor/pageCapacity';
+
+/** 007.png — the right-edge ornament art (rotated 90° in the chrome). Same
+ *  data-URI pipeline as the old LogoT (SVG-as-image blocks external refs;
+ *  dev fetches + converts async and re-renders). */
+let orn7DataUri =
+  typeof orn7AssetUrl === 'string' && orn7AssetUrl.startsWith('data:')
+    ? orn7AssetUrl
+    : '';
+const bookletLogoListeners = new Set<() => void>();
+if (!orn7DataUri) {
+  void fetch(orn7AssetUrl)
+    .then((res) => res.blob())
+    .then(
+      (blob) =>
+        new Promise<string>((resolve, reject) => {
+          const fr = new FileReader();
+          fr.onload = () => resolve(String(fr.result));
+          fr.onerror = () => reject(fr.error);
+          fr.readAsDataURL(blob);
+        }),
+    )
+    .then((uri) => {
+      orn7DataUri = uri;
+      bookletLogoListeners.forEach((fn) => fn()); // re-render open sheets
+    })
+    .catch(() => { /* chrome renders without the logo, never crashes */ });
+}
+
+/** Booklet viewBox — the sheet's own pixel space (matches A4_W/H_PX). */
+const BW = A4_W_PX;
+const BH = A4_H_PX;
+
+/** default tint — a very soft blueprint blue (the reference sheet's tone);
+ *  replaced wholesale once the user picks a template color */
+const BOOKLET_DEFAULT_PRIMARY = '#a8c6e2';
+
+/** booklet hand-drawn wobble for frame lines (viewBox units, ±w) */
+function bookletWobble(x: number, y: number, len: number, horizontal: boolean, seed: number): string {
+  const steps = Math.max(8, Math.floor(len / 26));
+  const parts: string[] = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const w = 0.9 * Math.sin(t * Math.PI * 3.1 + seed) + 0.5 * Math.sin(t * Math.PI * 7.3 + seed * 1.9);
+    const px = horizontal ? x + len * t : x + w;
+    const py = horizontal ? y + w : y + len * t;
+    parts.push(`${i === 0 ? 'M' : 'L'} ${px.toFixed(2)},${py.toFixed(2)}`);
+  }
+  return parts.join(' ');
+}
+
+/** pure geometry+color builder — shared verbatim by the editor background
+ *  renderer and the print/PDF string renderer (same contract as PageBorder).
+ *
+ *  GEOMETRY: every coordinate derives from BOOKLET_GEOMETRY (pageCapacity.ts)
+ *  — the ONE contract shared with the sheet padding, the float bounds and
+ *  the export paddings. No hand-copied values anywhere.
+ *
+ *  COLOR: the template follows the SAME BorderSettings the other templates
+ *  use (قالب tab → the existing color picker). The framed template's DEFAULT
+ *  navy/gold pair would read heavy on this design, so exactly those two
+ *  DEFAULT values are remapped to the booklet's soft blueprint blue — a
+ *  user-chosen color always passes through untouched. LogoT.png is NEVER
+ *  recolored: it renders from the asset as-is. */
+function buildBookletArt(settings: BorderSettings): {
+  primary: string;
+  secondary: string;
+  lines: Array<{ d: string; w: number; c: string; o: number }>;
+  corners: string;
+  /** the top-edge lesson-label slot (empty when no label is set) */
+  headerSlot: string;
+  bottomOrnaments: string;
+  logoBox: string;
+} {
+  const rawP = (settings.primaryColor || '').trim();
+  const rawS = (settings.secondaryColor || '').trim();
+  const primary = !rawP || rawP.toUpperCase() === '#1E3A5F' ? BOOKLET_DEFAULT_PRIMARY : rawP;
+  /* the second frame line: a coherent lighter companion of the SAME choice */
+  const secondary = !rawS || rawS.toUpperCase() === '#C5A24D'
+    ? blendToward(primary, '#e8f1f9', 0.5)
+    : rawS;
+
+  /* every number below flows from the ONE booklet contract */
+  const M = BOOKLET_GEOMETRY.frameInset;      // outer frame line inset
+  const L = BOOKLET_INNER_INSET;              // inner frame line inset
+  const AIR = BOOKLET_GEOMETRY.safeAir;
+  const wO = 1.4;          // outer line stroke
+  const wI = 1.1;          // inner line stroke
+  const o = 0.5;           // base opacity — the frame must stay quieter than content
+
+  const W = BW - 2 * M;
+  const H = BH - 2 * M;
+  const bottomY = M + H;   // outer bottom line y
+  const cx = BW / 2;
+
+  /* ── ornament zones interrupt the frame lines (the reference's rhythm:
+     ────◯〰──── bottom, a rotated ornament seated ON the right edge) ── */
+  const R = 17;                     // page-number circle radius
+  const numGap = R + 3;             // half-width of the bottom-line interruption
+  const ornW = BOOKLET_GEOMETRY.rightOrnW;   // ornament slot width (46px)
+  const ornH = ornW;                // square slot — the rotated art fills it
+  /* seated ON the border: the slot's right edge is FLUSH with the OUTER
+     right frame line (x = M + W), spanning outward across both lines */
+  const ornX = M + W - ornW;
+  const ornY = BH / 2 - ornH / 2;   // ornament y-range on the right edge
+  const tabGap = ornH / 2 + 8;      // half-height of the right-line interruption
+
+  /* top edge: sliced around the header slot (same two-phase trick as the
+     bottom edge / page-number circle) — an open space, no ornament */
+  const headerLabel = (settings.headerLabel ?? '').trim();
+  /* slot width hugs the label (v3) — the two phases below use headW/headX */
+  const slotLabel2 = headerLabel.length > 18 ? headerLabel.slice(0, 18) + '…' : headerLabel;
+  const headW = Math.min(320, Math.max(130, Math.round(slotLabel2.length * 9) + 34));
+  const headX = BW / 2 - headW / 2;  // centered on the top edge
+  const topParts = edgeParts(M, M, M + W, M, 0.7, 0.7, 0.7, 0, 0);
+  const topSeg = (xa: number, xb: number): { d: string; w: number; c: string; o: number } => ({
+    d: sliceX(topParts.outer, xa, xb).path,
+    w: wO, c: primary, o,
+  });
+
+  const lines: Array<{ d: string; w: number; c: string; o: number }> = [
+    // top edge — two phases around the header slot
+    ...(headerLabel ? [topSeg(M, headX), topSeg(headX + headW, M + W)] : [topSeg(M, M + W)]),
+    // left edge — continuous
+    { d: bookletWobble(M, M, H, false, 3.9), w: wO, c: primary, o },
+    // right outer edge — interrupted where the rotated ornament seats on it
+    { d: bookletWobble(M + W, M, ornY - 8 - M, false, 1.3), w: wO, c: primary, o },
+    { d: bookletWobble(M + W, ornY + tabGap, bottomY - (ornY + tabGap), false, 1.7), w: wO, c: primary, o },
+    // bottom outer edge — interrupted around the page-number circle
+    { d: bookletWobble(M, bottomY, cx - numGap - M, true, 2.1), w: wO, c: primary, o },
+    { d: bookletWobble(cx + numGap, bottomY, M + W - (cx + numGap), true, 2.4), w: wO, c: primary, o },
+    // inner frame — a fine double-ruled band G px inside; the top rule is
+    // sliced around the header slot like the outer line
+    ...(headerLabel ? [topSeg(L, headX + (L - M)), topSeg(headX + headW - (L - M), BW - L)] : [{ d: bookletWobble(L, L, BW - 2 * L, true, 5.2), w: wI, c: secondary, o }]),
+    { d: bookletWobble(L, L, BH - 2 * L, false, 7.5), w: wI, c: secondary, o },
+    { d: bookletWobble(BW - L, L, ornY - 8 - L, false, 6.1), w: wI, c: secondary, o },
+    { d: bookletWobble(BW - L, ornY + tabGap, BH - L - (ornY + tabGap), false, 6.4), w: wI, c: secondary, o },
+    { d: bookletWobble(L, BH - L, cx - numGap - L, true, 6.8), w: wI, c: secondary, o },
+    { d: bookletWobble(cx + numGap, BH - L, BW - L - (cx + numGap), true, 7.1), w: wI, c: secondary, o },
+  ];
+
+  /* ── corners: subtle double corner ticks (hand-ruled, no heavy medallions) */
+  const T = 26; // tick length
+  const corner = (x: number, y: number, sx: 1 | -1, sy: 1 | -1): string =>
+    `<path d="M ${x + sx * T} ${y} L ${x} ${y} L ${x} ${y + sy * T}" fill="none" stroke="${primary}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.62"/>`
+    + `<path d="M ${x + sx * (T + 5)} ${y + sy * 5} L ${x + sx * 5} ${y + sy * 5} L ${x + sx * 5} ${y + sy * (T + 5)}" fill="none" stroke="${secondary}" stroke-width="1" stroke-linecap="round" opacity="0.5"/>`;
+  const corners =
+    corner(M, M, 1, 1) + corner(M + W, M, -1, 1)
+    + corner(M, bottomY, 1, -1) + corner(M + W, bottomY, -1, -1);
+
+  /* ── top HEADER SLOT: the mid-top flourish design is REMOVED (user
+     request) — instead the top edge opens a quiet header space (same
+     slicing trick as the page-number circle: one continuous wave, two
+     phases) where the lesson label rests. Driven by the EXISTING
+     BorderSettings.headerLabel field (قالب tab → «سربرگ درس»); empty label
+     = a clean open gap, no ornament drawn. */
+
+  /* the slot itself: the label centered ON the top frame line (band center
+     y = M+2), no underline, no well — zero footprint beyond the frame band.
+     Width already computed above (headW hugs the text, v3 feedback). */
+  const headerSlot = headerLabel
+    ? (() => {
+        return `<g>`
+          + `<text x="${BW / 2}" y="${M + 6}" text-anchor="middle" dominant-baseline="central" fill="${blendToward(primary, '#17324a', 0.45)}" font-size="12" font-family="'Sahel', Tahoma, sans-serif" font-weight="700" opacity="0.9">${escapeXml(slotLabel2)}</text>`
+          + `</g>`;
+      })()
+    : '';
+
+  /* ── bottom ornaments: the page-number circle centered IN the bottom-edge
+     gap + two tiny waveform/heartbeat strokes filling the line on both
+     sides — exactly the reference's ────◯〰──── cadence. No fill in the
+     waves, same template color, stroke as fine as the frame itself. */
+  const waveform = (dir: 1 | -1): string => {
+    const x0 = cx + dir * numGap;
+    const x1 = cx + dir * (numGap + 38);
+    const mid = (x0 + x1) / 2;
+    return `<path d="M ${x0} ${bottomY} L ${mid - dir * 9} ${bottomY} L ${mid - dir * 4.5} ${bottomY - 6.5} L ${mid + dir * 2} ${bottomY + 7} L ${mid + dir * 5.5} ${bottomY} L ${x1} ${bottomY}" fill="none" stroke="${primary}" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" opacity="0.7"/>`;
+  };
+  const bottomOrnaments =
+    waveform(1) + waveform(-1)
+    + `<circle cx="${cx}" cy="${bottomY}" r="${R}" fill="#ffffff" stroke="${primary}" stroke-width="1.4" opacity="0.9"/>`
+    + `<circle cx="${cx}" cy="${bottomY}" r="${R - 3.5}" fill="none" stroke="${secondary}" stroke-width="0.8" opacity="0.55"/>`;
+
+  /* ── right ornament: the rotated 007.png art, NO box — seated directly ON
+     the right border lines (right edge FLUSH with the outer line, spanning
+     inward across both rules like a tab in the reference). Text edge stops
+     safeAir px left of the slot (BOOKLET_PADDING.right = outer line + slot
+     + AIR) — no overlap whatever the user types. The PNG is NEVER
+     recolored; renders from the asset as-is. Static page chrome:
+     pointer-events none, NOT an object, never enters the ProseMirror
+     document.
+     v2 — measured placement (no guessing): 007.png's visible ink sits at
+     102,190..634,445 inside its 740×624 canvas (large white margins), and
+     the canvas-level 'meet' fit let those margins float the art away from
+     the frame band and partially OUTSIDE the outer line. Now the INK box
+     itself is fitted: the drawn scale puts the ink's post-rotation
+     page-width on the frame band ((M+L)/2 centerline) and the art's
+     vertical center on the slot's center — در یک راستا با خطوط قاب. */
+  const ornArt = orn7DataUri
+    ? (() => {
+        /* measured ink constants of 007.png (740×624) — see note above */
+        const CANVAS_W = 740, CANVAS_H = 624;
+        const INK = { x: 102, y: 190, w: 533, h: 256 };
+        /* the frame band the art must read ON: outer→inner right lines */
+        const bandCenter = BW - (M + L) / 2;          // ≈773 (band 770..776)
+        const slotCx = ornX + ornW / 2;
+        /* ink page-width target: the band (6px) + optical air on both
+           sides — reads as a stripe riding the two rules */
+        const inkPageW = 13;
+        const scale = inkPageW / INK.h;               // post-rotate: ink page-w ← ink source-h
+        const drawnW = CANVAS_W * scale;
+        const drawnH = CANVAS_H * scale;
+        /* pre-rotation slot coords: rotate +90° maps a point at slot-local
+           y to page-x = ornX + ornW − y, so seating the ink's center on the
+           band (page-x = BW − (M+L)/2) needs slot-y center = (L−M)/2. The
+           ink's slot-x centers on the slot; imgLeft/imgTop are the drawn
+           image's top-left offsets INSIDE the slot. */
+        const inkSlotYCenter = (L - M) / 2;
+        const inkSlotXC = ornW / 2;   // slot-local: ink centers on the slot
+        /* «یکم بالاتر»: post-rotation page-y mirrors pre-rotation slot-x,
+           so shifting the drawn image LEFT inside the slot moves the ink UP
+           on the page. Named constant — user-tuned optical raise (px). */
+        const LOGO_RAISE_PX = 7;
+        /* top-left offsets of the drawn image inside the slot (slot-local) */
+        const imgLeft = inkSlotXC - (INK.x + INK.w / 2) * scale - LOGO_RAISE_PX;
+        const imgTop = inkSlotYCenter - (INK.y + INK.h / 2) * scale;
+        const cxo = ornX + ornW / 2;
+        const cyo = ornY + ornH / 2;
+        return `<g transform="rotate(90 ${cxo.toFixed(2)} ${cyo.toFixed(2)})">`
+          + `<image href="${orn7DataUri}" x="${(cxo - ornW / 2 + imgLeft).toFixed(2)}" y="${(cyo - ornH / 2 + imgTop).toFixed(2)}" width="${drawnW.toFixed(2)}" height="${drawnH.toFixed(2)}" preserveAspectRatio="xMidYMid meet"/>`
+          + `</g>`;
+      })()
+    : '';
+  const logoBox = ornArt;
+
+  return { primary, secondary, lines, corners, headerSlot, bottomOrnaments, logoBox };
+}
+
+/** blend `hex` toward `target` by `t` ∈ [0,1] — keeps the template's second
+ *  line a coherent companion of the user's color choice */
+function blendToward(hex: string, target: string, t: number): string {
+  const parse = (h: string): [number, number, number] => {
+    const m = /^#?([0-9a-f]{6})$/i.exec((h || '').trim());
+    if (!m) return [168, 198, 226];
+    const n = parseInt(m[1], 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  };
+  const a = parse(hex); const b = parse(target);
+  const mix = a.map((c, i) => Math.round(c * (1 - t) + b[i] * t));
+  return `#${mix.map((c) => Math.max(0, Math.min(255, c)).toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** inner SVG fragments of the booklet template (shared by both renderers) */
+function bookletSvgInner(settings: BorderSettings, pageNumber?: number): string {
+  const art = buildBookletArt(settings);
+  /* page number: Persian digits of the REAL page index (faDigits — the same
+     utility the pages sidebar and PageBorder's tab use); no hardcoded value.
+     Baseline derives from the frame geometry (outer bottom line + optical
+     half of the digit height) — no hand-measured offset. */
+  /* digits take the template color too — darkened toward ink so they stay
+     readable on any tint (the circle ring itself is art.primary) */
+  const numY = BOOKLET_GEOMETRY.frameInset + (BH - 2 * BOOKLET_GEOMETRY.frameInset) + 4.5;
+  const num = pageNumber != null && settings.showPageNumbers !== false
+    ? `<text x="${BW / 2}" y="${numY.toFixed(2)}" text-anchor="middle" fill="${blendToward(art.primary, '#17324a', 0.5)}" font-size="12" font-family="'Sahel', Tahoma, sans-serif" font-weight="700" opacity="0.95">${faDigits(pageNumber)}</text>`
+    : '';
+  return art.lines.map((l) => `<path d="${l.d}" fill="none" stroke="${l.c}" stroke-width="${l.w}" opacity="${l.o}"/>`).join('')
+    + art.corners + (art.headerSlot ?? '') + art.bottomOrnaments + num + art.logoBox;
+}
+
+/**
+ * On-screen booklet chrome, tiled once per A4 sheet exactly like PageBorder's
+ * background (repeat-y + 1123px size) — page-relative positioning by
+ * construction, so every editor zoom renders identically.
+ */
+export function bookletBackgroundStyle(
+  settings: BorderSettings,
+  pageNumber?: number,
+): CSSProperties {
+  const svg = `<svg viewBox="0 0 ${BW} ${BH}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">${bookletSvgInner(settings, pageNumber)}</svg>`;
+  return {
+    backgroundImage: `url("data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}")`,
+    backgroundSize: `100% ${A4_PAGE_H_PX}px`,
+    backgroundRepeat: 'repeat-y',
+    backgroundPosition: 'top center',
+  };
+}
+
+/** Booklet chrome element — page chrome, aria-hidden, outside the editor DOM.
+ *  Honors the shared «قاب» master switch (settings.enabled) like PageBorder.
+ *  Re-renders once when the dev-mode ornament data URI lands (see orn7AssetUrl). */
+export function BookletChrome({ settings, pageNumber }: { settings: BorderSettings; pageNumber?: number }) {
+  const [logoTick, setLogoTick] = useState(0);
+  useEffect(() => {
+    if (orn7DataUri) return;
+    const rerender = () => setLogoTick((t) => t + 1);
+    bookletLogoListeners.add(rerender);
+    return () => { bookletLogoListeners.delete(rerender); };
+  }, []);
+  const style = useMemo(
+    () => bookletBackgroundStyle(settings, pageNumber),
+    [settings.enabled, settings.primaryColor, settings.secondaryColor, settings.showPageNumbers, settings.headerLabel, pageNumber, logoTick],
+  );
+  if (!settings.enabled) return null;
+  return <div className="page-border" style={style} aria-hidden="true" />;
+}
+
+/** Print/PDF export — same geometry in the sheet's own SVG space (the print
+ *  pipeline maps px→mm uniformly, see pageModelExport.mmpx). */
+export function bookletSvgString(settings: BorderSettings, pageNumber?: number): string {
+  if (!settings.enabled) return '';
+  return `<svg viewBox="0 0 ${BW} ${BH}" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">\n  ${bookletSvgInner(settings, pageNumber)}\n</svg>`;
 }

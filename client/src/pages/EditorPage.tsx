@@ -5,7 +5,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ApiRequestError } from '@/api/client';
 import { useApp } from '@/store/AppProvider';
 import { analyzeDocument, faDigits } from '@/utils/fa';
-import type { AIResult, Note, PageKind, SaveState } from '@/types';
+import type { AIResult, Note, PageKind, SaveState, PageCoverAttrs } from '@/types';
 import { DEFAULT_BORDER_SETTINGS, type BorderSettings } from '@/types';
 import { Page as PageComponent, EMPTY_FLOATS_LIST, plainTextOf, type PageProps } from '@/components/editor/Page';
 import { PageSidebar } from '@/components/editor/PageSidebar';
@@ -37,6 +37,8 @@ import { AIDiffModal } from '@/components/ai/AIDiffModal';
 import { PrintPreviewModal } from '@/components/export/PrintPreviewModal';
 import { prepareWordHtml, buildWordEduCss, buildWordHeaderFooter } from '@/utils/wordExport';
 import { EduBlocksModal } from '@/components/editor/EduBlocksModal';
+import { CoverInsertModal } from '@/components/editor/CoverInsertModal';
+import { PageRangeModal } from '@/components/editor/PageRangeModal';
 import { eduBlocksCss, isTinted, resolveEduBlocks, DEFAULT_EDU_BLOCKS } from '@/utils/eduBlocks';
 import type { ExportPage } from '@/utils/pageModelExport';
 import { notesApi, tagsApi, aiApi, exportApi } from '@/api/endpoints';
@@ -44,7 +46,7 @@ import { useCollabSession } from '@/collab/useCollabSession';
 import { CollabPresenceChip, CollabBanner } from '@/components/editor/CollabPresence';
 import { wireDocObserver, seedPageFragmentFromJson, publishStructure } from '@/collab/editorSync';
 import type { CollabSession } from '@/collab/session';
-import { structureCreatePage, structureDeletePage, structureMovePage, reconcilePagesFromStructure, pagesFromRestoredDoc } from '@/collab/structureSync';
+import { structureCreatePage, structureDeletePage, structureMovePage, structureUpdateKind, reconcilePagesFromStructure, pagesFromRestoredDoc } from '@/collab/structureSync';
 import { floatUpsert, floatPatch, floatDelete, floatDiff, reconcileFloatsFromSession } from '@/collab/floatSync';
 import { publishTitle as collabPublishTitle, observeTitle } from '@/collab/metadataSync';
 import { pageJsonFromFragment } from '@/collab/editorSync';
@@ -72,8 +74,14 @@ interface DocPage {
   pageNumber: number;
   content: Record<string, unknown> | null;
   floatingElements: FloatingElement[];
-  /** visual kind: framed (قاب‌دار) | blank (بدون قاب) | notebook (نوت‌بوکی) */
+  /** visual kind: framed | blank | notebook | cover (جلد) | toc (فهرست) */
   kind: PageKind;
+  /** per-page سربرگ override (smart range modal) — when set, the page frame
+   *  header shows THIS label instead of the document-level headerLabel;
+   *  empty string = no header on that page. */
+  headerLabel?: string;
+  /** cover sheet metadata (item 15) — only read when kind === 'cover' */
+  coverAttrs?: PageCoverAttrs;
   /** true when this sheet was created by the automatic pagination engine
    *  (flow overflow) — such pages may be removed again when they empty out;
    *  manually created pages are never removed automatically. */
@@ -104,7 +112,7 @@ function mergeContent(doc: Record<string, unknown>, floats: FloatingElement[]): 
   return { ...doc, floatingElements: floats };
 }
 
-const PAGE_KINDS: PageKind[] = ['framed', 'blank', 'notebook'];
+const PAGE_KINDS: PageKind[] = ['framed', 'blank', 'notebook', 'cover', 'toc', 'booklet'];
 function isPageKind(v: unknown): v is PageKind {
   return typeof v === 'string' && (PAGE_KINDS as string[]).includes(v);
 }
@@ -124,27 +132,41 @@ function isPageKind(v: unknown): v is PageKind {
  *  converge. Ids are therefore deterministic (`p1…pN`, the persisted
  *  pageBreak ordinal) and only NEW pages (created at runtime by the user)
  *  get random ids — which the merge below persists for the next load. */
-function splitDocIntoPages(doc: Record<string, unknown> | null): Array<{ id?: string; content: Record<string, unknown>; kind: PageKind; auto: boolean }> {
+function splitDocIntoPages(doc: Record<string, unknown> | null): Array<{ id?: string; content: Record<string, unknown>; kind: PageKind; auto: boolean; cover?: PageCoverAttrs; headerLabel?: string }> {
   const blocks = Array.isArray(doc?.content) ? (doc.content as Record<string, unknown>[]) : [];
   const docAttrs = (doc?.attrs ?? {}) as Record<string, unknown>;
   const firstKind: PageKind = isPageKind(docAttrs.pageKind) ? docAttrs.pageKind : 'framed';
-  const chunks: Array<{ id?: string; nodes: Record<string, unknown>[]; kind: PageKind; auto: boolean }> = [{ id: 'p1', nodes: [], kind: firstKind, auto: false }];
+  const firstCover = docAttrs.pageCover as PageCoverAttrs | undefined;
+  const chunks: Array<{ id?: string; nodes: Record<string, unknown>[]; kind: PageKind; auto: boolean; cover?: PageCoverAttrs; headerLabel?: string }> = [{ id: 'p1', nodes: [], kind: firstKind, auto: false, cover: firstKind === 'cover' ? firstCover : undefined }];
   let ordinal = 1;
   for (const block of blocks) {
     if (block?.type === 'pageBreak') {
       const attrs = (block.attrs ?? {}) as Record<string, unknown>;
       ordinal += 1;
-      chunks.push({ id: typeof attrs.pid === 'string' && attrs.pid ? attrs.pid : `p${ordinal}`, nodes: [], kind: isPageKind(attrs.kind) ? attrs.kind : 'framed', auto: attrs.auto === true });
+      chunks.push({ id: typeof attrs.pid === 'string' && attrs.pid ? attrs.pid : `p${ordinal}`, nodes: [], kind: isPageKind(attrs.kind) ? attrs.kind : 'framed', auto: attrs.auto === true, cover: (attrs.cover as PageCoverAttrs | undefined) ?? undefined, headerLabel: typeof attrs.headerLabel === 'string' ? attrs.headerLabel : undefined });
       continue;
     }
     chunks[chunks.length - 1].nodes.push(block);
   }
-  /* a trailing pageBreak must not produce an empty phantom page */
-  if (chunks.length > 1 && chunks[chunks.length - 1].nodes.length === 0) chunks.pop();
+  /* a trailing pageBreak must not produce an empty phantom page — EXCEPT
+     cover/toc sheets: they are intentionally content-free (the artwork or
+     the ruled index is a layer, not editor content). Dropping them here
+     deleted a last-page جلد/فهرست on every reload. */
+  const lastChunk = chunks[chunks.length - 1];
+  if (
+    chunks.length > 1 &&
+    lastChunk.nodes.length === 0 &&
+    lastChunk.kind !== 'cover' &&
+    lastChunk.kind !== 'toc'
+  ) {
+    chunks.pop();
+  }
   return chunks.map((c) => ({
     id: c.id,
     kind: c.kind,
     auto: c.auto,
+    coverAttrs: c.cover,
+    headerLabel: c.headerLabel,
     content: {
       type: 'doc',
       content: c.nodes.length ? c.nodes : [{ type: 'paragraph' }],
@@ -169,6 +191,12 @@ function mergePagesIntoDoc(pages: DocPage[]): Record<string, unknown> {
       if (p.id) attrs.pid = p.id;
       if (p.kind !== 'framed') attrs.kind = p.kind;
       if (p.auto) attrs.auto = true;
+      /* per-page سربرگ override (smart range modal) rides the break like
+         kind — old clients ignore the unknown attr */
+      if (p.headerLabel !== undefined) attrs.headerLabel = p.headerLabel;
+      /* item 15: cover metadata rides the break so cover sheets survive
+         save → load (old clients ignore the unknown attr) */
+      if (p.coverAttrs) attrs.cover = p.coverAttrs;
       blocks.push(Object.keys(attrs).length ? { type: 'pageBreak', attrs } : { type: 'pageBreak' });
     }
     const arr = Array.isArray(p.content?.content)
@@ -186,6 +214,12 @@ function mergePagesIntoDoc(pages: DocPage[]): Record<string, unknown> {
     content: blocks.length ? blocks : [{ type: 'paragraph' }],
   };
   if (firstKind !== 'framed') doc.attrs = { pageKind: firstKind };
+  /* item 15: the FIRST page has no pageBreak before it — its cover metadata
+     must ride the DOC attrs or the first cover sheet loses its artwork on
+     every save → load round-trip */
+  if (firstKind === 'cover' && pages[0]?.coverAttrs) {
+    doc.attrs = { ...(doc.attrs as Record<string, unknown> ?? {}), pageCover: pages[0]!.coverAttrs };
+  }
   return doc;
 }
 
@@ -193,7 +227,7 @@ function mergePagesIntoDoc(pages: DocPage[]): Record<string, unknown> {
  *  (STABLE — collaboration fragments are addressed by it); only pages
  *  created live by the user get a fresh random id, which mergePagesIntoDoc
  *  then persists on the pageBreak so the id survives reload. */
-function makePage(i: number, content: Record<string, unknown>, floats: FloatingElement[], kind: PageKind = 'framed', auto = false, id?: string): DocPage {
+function makePage(i: number, content: Record<string, unknown>, floats: FloatingElement[], kind: PageKind = 'framed', auto = false, id?: string, coverAttrs?: PageCoverAttrs, headerLabel?: string): DocPage {
   return {
     id: id ?? `page-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}`,
     pageNumber: i + 1,
@@ -201,6 +235,8 @@ function makePage(i: number, content: Record<string, unknown>, floats: FloatingE
     floatingElements: floats,
     kind,
     auto,
+    coverAttrs,
+    ...(headerLabel !== undefined ? { headerLabel } : {}),
   };
 }
 
@@ -317,6 +353,8 @@ export default function EditorPage() {
   const [printOpen, setPrintOpen] = useState(false);
   /* کادرهای آموزشی customization modal (Ribbon → طراحی → کادرها) */
   const [eduBlocksOpen, setEduBlocksOpen] = useState(false);
+  /* item 15: جلد/فهرست insert modal */
+  const [coverInsertOpen, setCoverInsertOpen] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -1336,7 +1374,9 @@ export default function EditorPage() {
         /* one real sibling page per stored pageBreak section — a multi-page
            note reopens as multiple A4 sheets, not one giant clipped page */
         const loadedPages: DocPage[] = splitDocIntoPages(loadedDoc)
-          .map((c, i) => makePage(i, c.content, i === 0 ? loadedFloats : [], c.kind, c.auto, c.id));
+          /* coverAttrs MUST ride along (item 15) — dropping it here wiped
+             every cover/toc sheet the moment the note was reloaded */
+          .map((c, i) => makePage(i, c.content, i === 0 ? loadedFloats : [], c.kind, c.auto, c.id, c.cover, c.headerLabel));
         setPages(loadedPages);
         setActivePageId(loadedPages[0].id);
         setFloatingElementsByPage(Object.fromEntries(loadedPages.map((p) => [p.id, p.floatingElements])));
@@ -1352,7 +1392,7 @@ export default function EditorPage() {
             if (pendingJson && new Date(p.updatedAt) > new Date(n.updatedAt)) {
               const { doc: pendingDoc, floats: pendingFloats } = splitContent(pendingJson as Record<string, unknown>);
               const pendingPages: DocPage[] = splitDocIntoPages(pendingDoc)
-                .map((c, i) => makePage(i, c.content, i === 0 ? pendingFloats : [], c.kind, c.auto, c.id));
+                .map((c, i) => makePage(i, c.content, i === 0 ? pendingFloats : [], c.kind, c.auto, c.id, c.cover, c.headerLabel));
               setPages(pendingPages);
               setActivePageId(pendingPages[0].id);
               setFloatingElementsByPage(Object.fromEntries(pendingPages.map((pg) => [pg.id, pg.floatingElements])));
@@ -1551,13 +1591,18 @@ export default function EditorPage() {
             const localFloats = floatsByPageRef.current[pid] ?? [];
             const roomIds = new Set(roomFloats.map((f) => String(f.id)));
             const floats = [...roomFloats, ...localFloats.filter((f) => !roomIds.has(String(f.id)))];
+            /* cover/toc kinds pass through too — collapsing them to 'framed'
+               here turned every cover sheet into a plain framed page in the
+               persisted doc (and lost the artwork on the next load) */
+            const localCover = pagesRef.current.find((p) => p.id === pid)?.coverAttrs;
             return {
               id: pid,
               pageNumber: i + 1,
               content,
               floatingElements: floats,
-              kind: (meta.kind === 'blank' || meta.kind === 'notebook' ? meta.kind : 'framed') as PageKind,
+              kind: (meta.kind === 'blank' || meta.kind === 'notebook' || meta.kind === 'booklet' || meta.kind === 'cover' || meta.kind === 'toc' ? meta.kind : 'framed') as PageKind,
               auto: meta.auto,
+              coverAttrs: meta.kind === 'cover' ? localCover : undefined,
             };
           });
         })()
@@ -1868,7 +1913,7 @@ export default function EditorPage() {
   /* Page-management callbacks read pages/activePageId through refs and are
      built ONCE (§11): stable identity for the Ribbon/sidebar props, no
      closure recreation per keystroke, no listener churn. */
-  const createPage = useCallback((afterId: string, content?: Record<string, unknown>, floatingElements?: FloatingElement[], kind: PageKind = 'framed'): string => {
+  const createPage = useCallback((afterId: string, content?: Record<string, unknown>, floatingElements?: FloatingElement[], kind: PageKind = 'framed', coverAttrs?: PageCoverAttrs): string => {
     const pagesNow = pagesRef.current;
     const afterIndex = pagesNow.findIndex((p) => p.id === afterId);
     const newIndex = afterIndex === -1 ? pagesNow.length : afterIndex + 1;
@@ -1878,9 +1923,11 @@ export default function EditorPage() {
       content: content ?? { type: 'doc', content: [{ type: 'paragraph' }] },
       floatingElements: floatingElements ?? [],
       kind,
+      coverAttrs,
     };
     setPages((prev) => {
       const next = [...prev];
+      // (createPage body continues below — the splice/insert)
       next.splice(newIndex, 0, newPage);
       return next.map((p, idx) => ({ ...p, pageNumber: idx + 1 }));
     });
@@ -1905,6 +1952,33 @@ export default function EditorPage() {
     }
     return newPage.id;
   }, []);
+
+  /** Insert a page at POSITION 1 (جلد آغازین) — under all circumstances.
+   *  createPage('') appends (afterIndex −1 ⇒ end), which used to dump the
+   *  first-cover at the END of the document. Collab: the op encodes
+   *  "insert BEFORE the current first page" via opMovePage after create. */
+  const createPageAtTop = useCallback((
+    content?: Record<string, unknown>,
+    floatingElements?: FloatingElement[],
+    kind: PageKind = 'cover',
+    coverAttrs?: PageCoverAttrs,
+  ): string => {
+    const firstId = pagesRef.current[0]?.id ?? '';
+    const newId = createPage(firstId, content, floatingElements, kind, coverAttrs);
+    /* createPage inserted AFTER the first page — move to index 0 locally… */
+    setPages((prev) => {
+      const idx = prev.findIndex((p) => p.id === newId);
+      if (idx <= 0) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(idx, 1);
+      next.unshift(moved);
+      return next.map((p, i2) => ({ ...p, pageNumber: i2 + 1 }));
+    });
+    /* …and semantically in the room (MOVE before the first page) */
+    const s = collabSessionRef.current;
+    if (s && collabSeatRef.current === 'active' && firstId) structureMovePage(s, newId, firstId);
+    return newId;
+  }, [createPage]);
 
   const deletePage = useCallback((pageId: string) => {
     const pagesNow = pagesRef.current;
@@ -1966,6 +2040,109 @@ export default function EditorPage() {
     const pagesNow = pagesRef.current;
     return createPage(activePageIdRef.current || pagesNow[pagesNow.length - 1]?.id || '', undefined, undefined, kind);
   }, [createPage]);
+
+  /** change the ACTIVE page's visual kind in place (قالب tab → نوع قاب:
+   *  تبديل همين صفحه به خیلی سبز/نوت‌بوکی/بلنک) — pure state update: the
+   *  kind lives on the DocPage mirror and persists via the normal save path
+   *  (mergePagesIntoDoc writes it on the pageBreak/doc attrs). Content,
+   *  floats and the page's collab fragment (stable id) are untouched. */
+  const changePageKind = useCallback((kind: PageKind) => {
+    const id = activePageIdRef.current;
+    if (!id) return;
+    setPages((prev) => {
+      const idx = prev.findIndex((p) => p.id === id);
+      if (idx === -1 || prev[idx].kind === kind) return prev;
+      const next = [...prev];
+      next[idx] = { ...next[idx], kind };
+      return next.map((p, i) => ({ ...p, pageNumber: i + 1 }));
+    });
+    /* the kind rides the autosave payload like every other page property —
+       without marking dirty it would live only in React state until an
+       unrelated edit saved the note (same persistence gap as floats) */
+    dirtyRef.current = true;
+    scheduler.markDirty();
+    /* collab: the semantic kind must reach the room too — otherwise a peer
+       reconcile (meta.kind wins) snaps the page back to its old kind */
+    const s2 = collabSessionRef.current;
+    if (s2 && collabSeatRef.current === 'active') structureUpdateKind(s2, id, kind);
+  }, [scheduler]);
+
+  /* ── مودال هوشمند بازه‌ی صفحات — سربرگ/قالب روی ۱-۱۰ یا ۱۸-۳۱ یک‌جا ──
+     Applies to the REAL pages list; header changes patch each page's
+     BorderSettings override (fallback = the document border), kind changes
+     reuse changePageKind's persistence path (autosave + collab announce). */
+  const [pageRange, setPageRange] = useState<null | 'header' | 'kind'>(null);
+  const pageRangePages = useMemo(
+    () => pages.map((p, i) => ({ id: p.id, label: faDigits(i + 1) })),
+    [pages],
+  );
+  const applyPageRange = useCallback(
+    (pageIds: string[], payload: { headerLabel?: string; kind?: PageKind }) => {
+      if (payload.kind) {
+        for (const id of pageIds) {
+          if (id === activePageIdRef.current) {
+            changePageKind(payload.kind);
+            continue;
+          }
+          setPages((prev) => {
+            const idx = prev.findIndex((p) => p.id === id);
+            if (idx === -1 || prev[idx].kind === payload.kind) return prev;
+            const next = [...prev];
+            next[idx] = { ...next[idx], kind: payload.kind! };
+            return next.map((p, i) => ({ ...p, pageNumber: i + 1 }));
+          });
+          const s2 = collabSessionRef.current;
+          if (s2 && collabSeatRef.current === 'active') structureUpdateKind(s2, id, payload.kind);
+        }
+        dirtyRef.current = true;
+        scheduler.markDirty();
+      }
+      if (payload.headerLabel !== undefined) {
+        /* per-page header overrides: '' on a page = the page shows NO header
+           even when the document border has one; a label wins for that page.
+           Store the override on the page (kind-agnostic) and let Page.tsx
+           resolve document border + override. */
+        const label = payload.headerLabel === '-' ? '' : payload.headerLabel;
+        setPages((prev) => prev.map((p) => (
+          pageIds.includes(p.id) ? { ...p, headerLabel: label } : p
+        )));
+        dirtyRef.current = true;
+        scheduler.markDirty();
+      }
+    },
+    [scheduler],
+  );
+
+  /* ── item 15: جلد اول/دوم/آخر + فهرست ── placement policy: جلد اول → first
+     sheet، جلد دوم → after the first، جلد آخر → very end، فهرست → after the
+     first cover (یا صفحه دوم). The cover spec rides createPage as attrs. */
+  const addSpecialPage = useCallback((spec: { kind: PageKind; cover?: PageCoverAttrs }) => {
+    const pagesNow = pagesRef.current;
+    const lastId = pagesNow[pagesNow.length - 1]?.id ?? '';
+    if (spec.kind === 'cover' && spec.cover?.slot === 'last') {
+      createPage(lastId, undefined, undefined, 'cover', spec.cover);
+      setTimeout(() => document.querySelector(`[data-page-id="${pagesRef.current[pagesRef.current.length - 1]?.id}"]`)?.scrollIntoView({ behavior: 'smooth' }), 80);
+      return;
+    }
+    if (spec.kind === 'cover' && spec.cover?.slot === 'first') {
+      /* UNDER ALL CIRCUMSTANCES at position 1: the old createPage('') call
+         hit afterIndex = -1 and APPENDED the cover at the END of the doc. */
+      const newId = createPageAtTop(undefined, undefined, 'cover', spec.cover);
+      setTimeout(() => document.querySelector(`[data-page-id="${newId}"]`)?.scrollIntoView({ behavior: 'smooth' }), 80);
+      return;
+    }
+    /* second cover / toc: right after the first sheet — ALSO keep any
+       first-cover in front: anchor after the LAST front-matter page
+       (cover-first or toc) so front matter stays ordered cover → toc → body */
+    const pagesList = pagesRef.current;
+    let anchorId = pagesList[0]?.id ?? '';
+    if (pagesList[0]?.kind === 'cover' && pagesList[0]?.coverAttrs?.slot === 'first') {
+      const tocIdx = pagesList.findIndex((p) => p.kind === 'toc');
+      anchorId = pagesList[tocIdx >= 0 ? tocIdx : 0].id;
+    }
+    const newId2 = createPage(anchorId, undefined, undefined, spec.kind, spec.cover);
+    setTimeout(() => document.querySelector(`[data-page-id="${newId2}"]`)?.scrollIntoView({ behavior: 'smooth' }), 80);
+  }, [createPage, createPageAtTop]);
 
   const pageBeforeActive = useCallback(() => {
     const pagesNow = pagesRef.current;
@@ -2035,6 +2212,10 @@ export default function EditorPage() {
           html: pageEditorsRef.current[p.id]?.getHTML?.() ?? pageHtmlRef.current[p.id] ?? '',
           floatingElements: floatingElementsByPage[p.id] ?? [],
           kind: p.kind,
+          /* item 15: cover artwork rides the export snapshot */
+          cover: p.kind === 'cover' && p.coverAttrs
+            ? { coverSrc: p.coverAttrs.coverSrc, coverFit: p.coverAttrs.coverFit, coverTitle: p.coverAttrs.coverTitle, coverSubtitle: p.coverAttrs.coverSubtitle }
+            : undefined,
         }))
     );
     setPrintOpen(true);
@@ -2139,7 +2320,17 @@ export default function EditorPage() {
    *  (ids/order/count) changes or a thumbnail actually updates — typing in
    *  page N must not rebuild the strip's page array. */
   const sidebarPages = useMemo(
-    () => pages.map((p) => ({ id: p.id, pageNumber: p.pageNumber, kind: p.kind, html: pageThumbs[p.id] ?? '' })),
+    () => pages.map((p) => ({
+      id: p.id,
+      pageNumber: p.pageNumber,
+      kind: p.kind,
+      html: pageThumbs[p.id] ?? '',
+      /* item 15: cover thumbnail fields (flat, sidebar-friendly) */
+      coverSrc: p.kind === 'cover' ? p.coverAttrs?.coverSrc : undefined,
+      coverFit: p.kind === 'cover' ? p.coverAttrs?.coverFit : undefined,
+      coverTitle: p.kind === 'cover' ? p.coverAttrs?.coverTitle : undefined,
+      coverSubtitle: p.kind === 'cover' ? p.coverAttrs?.coverSubtitle : undefined,
+    })),
     // pageIdKey encodes id/order/count; pageThumbs changes only after its
     // 400ms debounce actually ran (not per keystroke).
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2309,6 +2500,7 @@ export default function EditorPage() {
           onSelect={selectPageFromSidebar}
           onAddPage={addPageFromSidebar}
           onAddPageOfKind={addPageOfKindSidebar}
+          onOpenCoverInsert={() => setCoverInsertOpen(true)}
           onDuplicate={duplicatePage}
           onDelete={deletePage}
           onReorder={movePageTo}
@@ -2326,6 +2518,7 @@ export default function EditorPage() {
             onToggleFind={() => setFindOpen(true)}
             onNewPage={() => createPage(activePageId || pages[pages.length - 1]?.id || '')}
             onAddPage={addPageOfKind}
+            onChangePageKind={changePageKind}
             onAppendPageAtEnd={() => appendPageAtEnd()}
             onAddFloatingElement={addFloatingElement}
             onNavigateSettings={() => navigate('/settings')}
@@ -2343,6 +2536,9 @@ export default function EditorPage() {
             onZoomChange={setZoom}
             eduBlocks={eduBlocks}
             onOpenEduBlocks={() => setEduBlocksOpen(true)}
+            onOpenCoverInsert={() => setCoverInsertOpen(true)}
+            onOpenPageRange={(m) => setPageRange(m)}
+            activePageKind={activePage?.kind}
             saveState={saveState}
             /* collaboration presence (group notes only) — separate concern
                from SaveState, rendered beside it in the Ribbon */
@@ -2381,7 +2577,13 @@ export default function EditorPage() {
                   pageId={page.id}
                   pageNumber={page.pageNumber}
                   kind={page.kind}
-                  borderSettings={border}
+                  coverAttrs={page.coverAttrs}
+                  /* per-page سربرگ override (smart range modal): when the page
+                     declares one, it wins over the document-level label;
+                     '' = explicitly NO header on that page */
+                  borderSettings={page.headerLabel !== undefined
+                    ? { ...border, headerLabel: page.headerLabel }
+                    : border}
                   content={page.content}
                   /* ── collaboration binding ── when the room is live, each
                      sheet binds to its shared yjs fragment (identity = stable
@@ -2447,6 +2649,21 @@ export default function EditorPage() {
           the print/PDF pipeline so export always mirrors the editor */}
       <style dangerouslySetInnerHTML={{ __html: eduCss }} />
       <EduBlocksModal open={eduBlocksOpen} onClose={() => setEduBlocksOpen(false)} />
+      <CoverInsertModal
+        open={coverInsertOpen}
+        onClose={() => setCoverInsertOpen(false)}
+        onInsert={addSpecialPage}
+      />
+      {/* مودال هوشمند بازه‌ی صفحات — سربرگ/قالب روی ۱-۱۰، ۱۸-۳۱، فرد/زوج */}
+      <PageRangeModal
+        open={pageRange !== null}
+        mode={pageRange ?? 'header'}
+        pages={pageRangePages}
+        border={border}
+        originPageNo={pages.findIndex((p) => p.id === activePageId) + 1}
+        onClose={() => setPageRange(null)}
+        onApply={applyPageRange}
+      />
       {ctxMenu && (
         <ContextMenu
           x={ctxMenu.x}

@@ -96,9 +96,19 @@ export function GroupDetailPage() {
 
   return (
     <div className="mx-auto max-w-4xl p-6" style={{ animation: 'pn-fade-in 0.15s ease-out' }}>
-      {/* Group header */}
+      {/* Group header — accent ring carries the group's chosen color */}
       <div className="flex flex-wrap items-center gap-4">
-        <GroupAvatar name={group.name} avatar={group.avatar} className="h-16 w-16" rounded="rounded-2xl" />
+        <span
+          className="inline-flex rounded-2xl p-[3px]"
+          style={group.accentColor ? { background: group.accentColor } : undefined}
+        >
+          <GroupAvatar
+            name={group.name}
+            avatar={group.avatar}
+            className="h-16 w-16"
+            rounded="rounded-[13px]"
+          />
+        </span>
         <div className="min-w-0 grow">
           <h1 className="truncate text-xl font-extrabold tracking-tight text-ink-900 dark:text-ink-100">{group.name}</h1>
           <p className="mt-0.5 text-sm text-ink-500 dark:text-ink-400">
@@ -127,44 +137,52 @@ export function GroupDetailPage() {
         )}
       </div>
 
-      {/* Tabs — ARIA tabs pattern: roving tabindex + arrow keys */}
-      <div className="mt-5 flex gap-1 border-b border-black/5 pb-px dark:border-white/5" role="tablist" aria-label="بخش‌های گروه">
-        {TABS.map((t, i) => (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            id={`group-tab-${t.id}`}
-            aria-controls={`group-panel-${t.id}`}
-            aria-selected={tab === t.id}
-            tabIndex={tab === t.id ? 0 : -1}
-            onClick={() => setTab(t.id)}
-            onKeyDown={(e) => {
-              if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-              e.preventDefault();
-              const dir = e.key === 'ArrowLeft' ? 1 : -1; // RTL: Left = next
-              const next = TABS[(i + dir + TABS.length) % TABS.length];
-              setTab(next.id);
-              document.getElementById(`group-tab-${next.id}`)?.focus();
-            }}
-            className={`rounded-t-lg px-4 py-2 text-[13px] font-medium transition-[background,color] duration-100 focus-visible:shadow-focus ${
-              tab === t.id
-                ? 'bg-gray-100 text-ink-900 dark:bg-[#222] dark:text-white'
-                : 'text-ink-500 hover:bg-gray-50 hover:text-ink-800 dark:text-ink-400 dark:hover:bg-[#1a1a1a] dark:hover:text-ink-200'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {/* Vertical right-side navigation (RTL: first in DOM = rightmost) —
+          one column for the tabs, content fills the rest. Same ARIA tabs
+          pattern as before (roving tabindex + arrow keys) but vertical. */}
+      <div className="mt-5 flex flex-row-reverse items-start gap-5">
+        <div
+          className="w-40 shrink-0 space-y-1 rounded-2xl bg-black/[0.03] p-1.5 dark:bg-white/[0.04]"
+          role="tablist"
+          aria-label="بخش‌های گروه"
+          aria-orientation="vertical"
+        >
+          {TABS.map((t, i) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              id={`group-tab-${t.id}`}
+              aria-controls={`group-panel-${t.id}`}
+              aria-selected={tab === t.id}
+              tabIndex={tab === t.id ? 0 : -1}
+              onClick={() => setTab(t.id)}
+              onKeyDown={(e) => {
+                if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+                e.preventDefault();
+                const dir = e.key === 'ArrowDown' ? 1 : -1;
+                const next = TABS[(i + dir + TABS.length) % TABS.length];
+                setTab(next.id);
+                document.getElementById(`group-tab-${next.id}`)?.focus();
+              }}
+              className={`w-full rounded-lg px-3 py-2 text-right text-[13px] font-medium transition-[background,color] duration-100 focus-visible:shadow-focus ${
+                tab === t.id
+                  ? 'bg-white text-ink-900 shadow-sm dark:bg-[#222] dark:text-white'
+                  : 'text-ink-500 hover:bg-black/[0.04] hover:text-ink-800 dark:text-ink-400 dark:hover:bg-white/[0.06] dark:hover:text-ink-200'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
 
-      <div
-        id={`group-panel-${tab}`}
-        role="tabpanel"
-        aria-labelledby={`group-tab-${tab}`}
-        tabIndex={-1}
-        className="mt-5"
-      >
+        <div
+          id={`group-panel-${tab}`}
+          role="tabpanel"
+          aria-labelledby={`group-tab-${tab}`}
+          tabIndex={-1}
+          className="min-w-0 grow"
+        >
         {tab === 'overview' && <GroupOverviewPanel group={group} members={members} />}
         {tab === 'notes' && <GroupNotesPanel group={group} canCreate={true} />}
         {tab === 'members' && (
@@ -193,6 +211,7 @@ export function GroupDetailPage() {
             onSaved={(g) => setGroup(g)}
           />
         )}
+        </div>
       </div>
     </div>
   );

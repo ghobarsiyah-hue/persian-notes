@@ -8,7 +8,8 @@
     "client"
   ],
   "scripts": {
-    "dev": "concurrently -n api,web -c blue,cyan \"npm:dev -w server\" \"npm:dev -w client\"",
+    "dev": "concurrently -n api,web -c blue,cyan --kill-others \"npm:dev -w server\" \"npm:dev -w client\"",
+    "predev": "node scripts/preflight.mjs",
     "dev:server": "npm run dev -w server",
     "dev:client": "npm run dev -w client",
     "build": "npm run build -w client",

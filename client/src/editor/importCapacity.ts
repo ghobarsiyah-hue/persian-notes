@@ -69,7 +69,7 @@ export interface ImportSpace {
 export function measureImportSpace(editor: Editor | null): ImportSpace {
   const pm = editor?.view?.dom as HTMLElement | undefined;
   const pageEl = pm?.closest('.page-paper') as HTMLElement | null;
-  const kind = (pageEl?.className.match(/page-(framed|blank|notebook)/)?.[1] ?? 'framed') as ImportSpace['pageKind'];
+  const kind = (pageEl?.className.match(/page-(framed|blank|notebook|booklet|cover|toc)/)?.[1] ?? 'framed') as ImportSpace['pageKind'];
   const pol = pagePadding(kind);
   const usable = { w: A4_W_PX - pol.left - pol.right, h: A4_H_PX - pol.top - pol.bottom };
   const contentW = pm ? pm.clientWidth : usable.w;

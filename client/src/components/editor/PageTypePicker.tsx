@@ -1,4 +1,4 @@
-import { FileText, Minus, Notebook } from 'lucide-react';
+import { BookOpen, FileText, Minus, Notebook } from 'lucide-react';
 import type { PageKind } from '@/types';
 
 /* mini A4 preview of each page kind (794×1123 scaled down) */
@@ -30,6 +30,24 @@ function MiniPage({ kind }: { kind: PageKind }) {
       </div>
     );
   }
+  if (kind === 'booklet') {
+    /* خیلی سبز — fine double blue frame + logo-tab hint on the right edge */
+    return (
+      <div
+        className="relative overflow-hidden rounded-[2px] bg-white dark:bg-[#242424]"
+        style={{
+          width: PW,
+          height: PH,
+          boxShadow: 'inset 0 0 0 1px rgba(168,198,226,0.9), inset 0 0 0 2.5px rgba(168,198,226,0.35)',
+        }}
+      >
+        <div
+          className="absolute bg-white dark:bg-[#242424]"
+          style={{ right: -2, top: '40%', width: 6, height: 12, borderRadius: 1, boxShadow: 'inset 0 0 0 1px rgba(168,198,226,0.9)' }}
+        />
+      </div>
+    );
+  }
   /* framed — ornamental border hint */
   return (
     <div
@@ -47,9 +65,10 @@ const KIND_META: Array<{ kind: PageKind; label: string; desc: string; icon: type
   { kind: 'framed', label: 'قاب‌دار', desc: 'با قاب تزئینی', icon: FileText },
   { kind: 'blank', label: 'بلنک (بدون قاب)', desc: 'برگه سفید ساده', icon: Minus },
   { kind: 'notebook', label: 'نوت‌بوکی (خط‌دار)', desc: 'مثل دفترچه خط‌دار', icon: Notebook },
+  { kind: 'booklet', label: 'خیلی سبز', desc: 'قاب ظریف + شماره صفحه + لوگو', icon: BookOpen },
 ];
 
-export function PageTypePicker({ onPick }: { onPick: (kind: PageKind) => void }) {
+export function PageTypePicker({ onPick, onPickSpecial }: { onPick: (kind: PageKind) => void; onPickSpecial?: () => void }) {
   return (
     <div className="w-[248px] p-1">
       <div className="px-2 pb-1 pt-1.5 text-[9px] font-bold uppercase tracking-widest text-ink-300 dark:text-ink-600">
@@ -71,6 +90,9 @@ export function PageTypePicker({ onPick }: { onPick: (kind: PageKind) => void })
             <Icon className="h-3.5 w-3.5 shrink-0 text-ink-400 dark:text-ink-500" />
           </button>
         ))}
+        {/* جلد/فهرست lives ONLY in the طراحی-page SidePanel now — a duplicate
+            entry here opened the panel over this dropdown (z-fight) and the
+            user asked for one entry point per surface. */}
       </div>
     </div>
   );

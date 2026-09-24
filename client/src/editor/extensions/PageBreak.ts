@@ -54,6 +54,25 @@ export const PageBreak = Node.create({
         parseHTML: (el) => (el.getAttribute('data-auto') === 'true' ? true : null),
         renderHTML: (attrs) => (attrs.auto === true ? { 'data-auto': 'true' } : {}),
       },
+      /* the STABLE page id — collab fragments are addressed by it; without
+         this declaration the schema stripped pid on load and every reload
+         re-randomized page identities */
+      pid: {
+        default: null,
+        parseHTML: (el) => el.getAttribute('data-pid'),
+        renderHTML: (attrs) => (attrs.pid ? { 'data-pid': attrs.pid as string } : {}),
+      },
+      /* item 15: cover metadata (slot/src/fit/title) — a JSON payload that
+         must survive save → load through the schema, same as pid/kind */
+      cover: {
+        default: null,
+        parseHTML: (el) => {
+          const raw = el.getAttribute('data-cover');
+          if (!raw) return null;
+          try { return JSON.parse(raw); } catch { return null; }
+        },
+        renderHTML: (attrs) => (attrs.cover ? { 'data-cover': JSON.stringify(attrs.cover) } : {}),
+      },
     };
   },
 

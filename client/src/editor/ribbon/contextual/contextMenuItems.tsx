@@ -18,7 +18,8 @@ import { h4 } from './icons';
 import { resolveSelectionContext } from './registry';
 import { getSourceSelections } from './selectionStore';
 import { getFloatingSelectionBridge } from './floatingSelectionBridge';
-import { openEduBlockStyleModal } from './contexts/eduBlockStyleModalHost';
+import { loadImageFile } from '@/utils/imageFile';
+import { openEduBlockStyleModal, openEduQuestionStyleModal } from './contexts/eduBlockStyleModalHost';
 import { getActiveEquation } from '@/editor/equations/bridge';
 import { loadRecentColors, rememberColor } from '@/utils/recentColors';
 import type { SelectableObject } from './types';
@@ -170,9 +171,7 @@ function insertSectionItems(ed: Editor, a: CtxMenuActions): MenuItem[] {
     inp.addEventListener('change', () => {
       const f = inp.files?.[0];
       if (!f) return;
-      const r = new FileReader();
-      r.onload = () => ch().setImage({ src: String(r.result) }).run();
-      r.readAsDataURL(f);
+      loadImageFile(f).then((img) => ch().setImage({ src: img.src }).run()).catch(() => undefined);
     });
     inp.click();
   };
@@ -373,9 +372,8 @@ function imageMenu(ed: Editor, attrs: Record<string, unknown>): MenuItem[] {
     inp.addEventListener('change', () => {
       const f = inp.files?.[0];
       if (!f) return;
-      const r = new FileReader();
-      r.onload = () => apply(String(r.result));
-      r.readAsDataURL(f);
+      /* بدون محدودیت حجم — auto-fit داخلی */
+      loadImageFile(f).then((img) => apply(img.src)).catch(() => undefined);
     });
     inp.click();
   };
@@ -515,7 +513,21 @@ function emptyPageMenu(ed: Editor, a: CtxMenuActions): MenuItem[] {
  *  Prepended to the text menu when the caret/selection sits inside one. */
 function eduBlockMenu(ed: Editor): MenuItem[] {
   const ch = () => ed.chain().focus();
+  /* the deepest edu node the caret sits in — decides WHICH modal the menu
+     opens (nested boxes: سوال داخل نکته must reach the INNER box) */
+  const innerEduType = (() => {
+    const $from = ed.state.selection.$from;
+    for (let d = $from.depth; d >= 1; d--) {
+      const n = $from.node(d).type.name;
+      if (/^(calloutBlock|questionBlock|exampleBlock|keyTermBlock|longAnswerBlock|footnoteBlock|highlightBox|referenceBlock|trueFalseBlock|mcqBlock)$/.test(n)) return n;
+    }
+    return '';
+  })();
+  const isQuiz = /^(questionBlock|trueFalseBlock|mcqBlock|longAnswerBlock)$/.test(innerEduType);
   return [
+    ...(isQuiz
+      ? [act('edublk.qstyle', 'شخصی‌سازی سوال…', () => openEduQuestionStyleModal(ed), { icon: h4(Palette) })]
+      : []),
     act('edublk.style', 'شخصی‌سازی کادر…', () => openEduBlockStyleModal(ed), { icon: h4(Paintbrush) }),
     { kind: 'submenu', key: 'edublk.kind', label: 'نوع کادر', icon: h4(Repeat), items: [
       act('edublk.kind.definition', 'تعریف', () => ch().updateAttributes('calloutBlock', { kind: 'definition' }).run(), { active: ed.getAttributes('calloutBlock').kind === 'definition' }),

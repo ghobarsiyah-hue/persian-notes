@@ -1,13 +1,12 @@
 /**
- * Brand marks — the three official logo variants shipped as PNG:
+ * Brand marks — the official logo assets shipped as PNG:
  *   LogoW.png → for WHITE backgrounds (light surfaces)
  *   LogoB.png → for BLACK backgrounds (dark surfaces)
  *   LogoT.png → transparent background (works on any surface, incl. glass)
+ *   007.png   → the sidebar/navbar mark (user pick) — used for 'sidebar'
  *
- * The T variant is the default everywhere: the app's surfaces are glass /
- * off-white in light mode and near-black in dark mode, and one transparent
- * mark reads correctly on both. Consumers who need a solid-backed variant
- * (e.g. favicon-style squares on pure white) can import LogoW/LogoB.
+ * The sidebar nav renders 007.png on BOTH themes: the glass panel keeps its
+ * own readable background, so one mark works everywhere (item ۷).
  *
  * Usage: <BrandLogo size={32} /> — falls back to the existing monogram "P"
  * tile if the asset fails to load, so the header never renders empty.
@@ -17,16 +16,19 @@ import { useState } from 'react';
 import logoT from '@/assets/brand/LogoT.png';
 import logoW from '@/assets/brand/LogoW.png';
 import logoB from '@/assets/brand/LogoB.png';
+import logo007 from '@/assets/brand/007.png';
 
-export type LogoVariant = 'auto' | 'white-bg' | 'black-bg';
+export type LogoVariant = 'auto' | 'white-bg' | 'black-bg' | 'sidebar';
 
 export const LOGO_SOURCES: Record<Exclude<LogoVariant, 'auto'>, string> = {
   'white-bg': logoW,
   'black-bg': logoB,
+  sidebar: logo007,
 };
 
 export function getLogoSource(variant: LogoVariant): string {
   if (variant === 'auto') return logoT;
+  if (variant === 'sidebar') return logo007;
   return LOGO_SOURCES[variant];
 }
 

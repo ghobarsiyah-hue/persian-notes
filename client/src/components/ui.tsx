@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useApp } from '@/store/AppProvider';
 
@@ -137,9 +138,14 @@ export function Modal({ open, onClose, title, children, wide }: { open: boolean;
   }, [open, onClose]);
 
   if (!open) return null;
-  return (
+  /* PORTAL to document.body — WITHOUT it a parent with `backdrop-filter`
+     (the ribbon's pn-glass-panel, sidebars, cards…) becomes the containing
+     block for position:fixed children, trapping the dialog inside that
+     parent's box (the "modal opens squashed inside the ribbon" bug).
+     Portalling skips every such ancestor; z-500 tops the ribbon panels. */
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-[500] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
       role="dialog"
       aria-modal="true"
       aria-label={title}
@@ -159,7 +165,58 @@ export function Modal({ open, onClose, title, children, wide }: { open: boolean;
         </div>
         <div className="grow overflow-y-auto overscroll-behavior-contain p-6">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
+  );
+}
+
+/** ── SidePanel — the Canva-style contextual panel (الگوی «رولی از چپ») ──
+ *  A NON-MODAL editing surface that slides in from the LEFT edge. Unlike
+ *  Modal there is NO backdrop and nothing is blocked: the editor underneath
+ *  stays visible and interactive, because contextual editing is exactly the
+ *  flow where the user reads/adjusts the live page while choosing values
+ *  (چرا: modals break that loop — the user must close → select → reopen;
+ *  the research pattern for secondary, ongoing, reversible tasks).
+ *  ARIA: role="complementary" (not dialog — nothing is inert behind it);
+ *  Escape closes; the close button returns focus to the opener when the
+ *  caller passes onClose. */
+export function SidePanel({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+  /* PORTAL to body — same containing-block trap as Modal (backdrop-filter
+     ancestors). Anchored to the LEFT edge, full height, no overlay: the page
+     stays usable behind it; the shadow keeps the layer readable. */
+  return createPortal(
+    <aside
+      className="fixed inset-y-0 left-0 z-[480] flex w-[min(660px,94vw)] flex-col border-r border-ink-100 bg-white dark:border-ink-800 dark:bg-[#161616]"
+      style={{ animation: 'pn-side-in 0.18s ease-out', boxShadow: '10px 0 28px rgba(0,0,0,0.12)' }}
+      role="complementary"
+      aria-label={title}
+    >
+      <div className="flex shrink-0 items-center justify-between px-4 py-3" style={{ boxShadow: 'inset 0 -1px 0 0 rgba(0,0,0,0.06)' }}>
+        <h2 className="text-[13.5px] font-bold tracking-[-0.01em] text-ink-900 dark:text-ink-100">{title}</h2>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="بستن"
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-800 dark:hover:bg-ink-800 dark:hover:text-ink-200"
+        >
+          ✕
+        </button>
+      </div>
+      {/* NO inner scroll of its own — the panels' content is designed to fit
+          the viewport (wide two-column layouts instead of stacked lists).
+          overflow-y-auto is only an emergency fallback for very short
+          windows; the previous overflow-hidden silently CLIPPED content. */}
+      <div className="grow overflow-y-auto p-3.5">{children}</div>
+    </aside>,
+    document.body,
   );
 }
 

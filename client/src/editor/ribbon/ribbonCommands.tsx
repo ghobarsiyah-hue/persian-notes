@@ -16,9 +16,10 @@ import {
   ZoomIn, ZoomOut, PanelsTopLeft, Paintbrush, Plus,
   Square as SquareIcon,
   Circle as CircleIcon, Diamond as DiamondIcon,
-  Sparkles as SparklesIcon, ArrowRight, MessageSquare,
+  Sparkles as SparklesIcon, ArrowRight, MessageSquare, Images, Copy,
 } from 'lucide-react';
 import { faDigits } from '@/utils/fa';
+import { loadImageFile, floatDimsFor } from '@/utils/imageFile';
 import type { BorderStyle, BorderSettings, PageKind, EduBlocksSettings, SaveState } from '@/types';
 import { SaveStatusBadge } from '@/components/editor/SaveStatusBadge';
 import {
@@ -33,6 +34,8 @@ import { useContextualRibbon } from './contextual/useContextualRibbon';
 import { ContextualToolRow } from './contextual/ContextualToolRow';
 import { PageTypePicker } from '@/components/editor/PageTypePicker';
 import { IconPicker } from '@/components/editor/IconPicker';
+import { InsertBlockModal } from '@/components/editor/InsertBlockModal';
+import { PageDesignModal } from '@/components/editor/PageDesignModal';
 import { svgToDataUri } from '@/components/editor/iconAssets';
 import { planTable, measureImportSpace } from '@/editor/importCapacity';
 
@@ -55,6 +58,9 @@ export interface RibbonProps {
   onNewPage?: () => void;
   /** add a page of a specific visual kind (بلنک بدون قاب / نوت‌بوکی خط‌دار) */
   onAddPage: (kind: PageKind) => void;
+  /** change the ACTIVE page's visual kind in place (نوع قاب dropdown:
+   *  همین صفحه به خیلی سبز/نوت‌بوکی/بلنک تبدیل شود) */
+  onChangePageKind?: (kind: PageKind) => void;
   onAppendPageAtEnd: () => void;
   /* floating layers of the ACTIVE page (text boxes / shapes) — moved here
      from the old PageToolbar above the workspace */
@@ -82,6 +88,15 @@ export interface RibbonProps {
   eduBlocks: EduBlocksSettings;
   /** open the کادرهای آموزشی customization modal */
   onOpenEduBlocks: () => void;
+  /** open the جلد/فهرست insert modal (item 15) */
+  onOpenCoverInsert: () => void;
+  /** open the smart page-range modal — applies a سربرگ یا قالب to a RANGE
+   *  of pages (e.g. ۱-۱۰، فرد/زوج) in one action instead of page-by-page */
+  onOpenPageRange?: (mode: 'header' | 'kind') => void;
+  /** the ACTIVE page's template kind — the طراحی tab hides classic-frame
+   *  only controls when the page uses a self-contained template (خیلی سبز،
+   *  بلنک، نوت‌بوکی، جلد، فهرست) whose look does not follow border settings */
+  activePageKind?: PageKind;
   /** centralized save-state of THIS document (§6) — rendered as the subtle
    *  persistent status chip in the top bar; never another note's state */
   saveState: SaveState;
@@ -186,11 +201,11 @@ function setTextAlignSmart(editor: Editor, align: string) {
 
 export function Ribbon({
   editor, onOpenAIPanel, aiPanelOpen, onOpenPrintPreview, onToggleFind,
-  onNewPage, onAddPage, onAppendPageAtEnd, onAddFloatingElement,
+  onNewPage, onAddPage, onChangePageKind, onAppendPageAtEnd, onAddFloatingElement,
   onNavigateSettings, onToggleSidebar,
   onToggleFocus, onSave, onShowHistory, onShowShortcuts, onExportWord, onExportHtml,
   wordCount, border, onBorderChange, zoom, onZoomChange,
-  eduBlocks, onOpenEduBlocks, saveState, collabPresence,
+  eduBlocks, onOpenEduBlocks, onOpenCoverInsert, onOpenPageRange, activePageKind, saveState, collabPresence,
 }: RibbonProps) {
   const { toast, user, online, settings } = useApp();
   const navigate = useNavigate();
@@ -204,6 +219,11 @@ export function Ribbon({
      picker (item ۴/14). panelTick makes the panel registry reactive. */
   const [panelTick, bumpPanels] = useState(0);
   useEffect(() => subscribePanels(() => bumpPanels((n) => n + 1)), []);
+  /* درج کادر/سوال — redesigned modal with live preview (item ۱۴) */
+  const [insertModal, setInsertModal] = useState<null | 'edu' | 'question'>(null);
+  /* مودال «طراحی صفحه» — the redesigned design surface (template gallery +
+     live preview + template-aware settings) replaces the old flat row */
+  const [designModalOpen, setDesignModalOpen] = useState(false);
   /* جستجو و جایگزینی lives in a dropdown panel opened by the persistent
      toolbar search icon (top bar) — no more floating search box.
      findReplace: the panel opens with its جایگزینی row expanded (Ctrl+H). */
@@ -336,9 +356,9 @@ export function Ribbon({
   const currentMarker = inList ? ((editor.getAttributes(listType).marker as string) ?? '') : '';
   const listMarkerOptions = listType === 'orderedList' ? OL_MARKER_OPTIONS : UL_MARKER_OPTIONS;
 
-  /* ── تصویر خالی — floating image via file picker; the box starts at a
-     sane aspect-correct dimension capped to the A4 content width, then the
-     user drags it / resize-handles it like any other floating layer ── */
+  /* ── تصویر خالی — floating image via file picker. بدون محدودیت حجم:
+     loadImageFile خودش تصاویر بزرگ را به کیفیت چاپ می‌رساند (auto-fit)،
+     سپس کادر با نسبت واقعی و حداکثر عرض محتوا شروع می‌شود ── */
   const insertFloatingImage = () => {
     const input = document.createElement('input');
     input.type = 'file';
@@ -346,20 +366,15 @@ export function Ribbon({
     input.onchange = () => {
       const file = input.files?.[0];
       if (!file) return;
-      const reader = new FileReader();
-      reader.onload = () => {
-        const src = String(reader.result);
-        const img = new Image();
-        img.onload = () => {
-          const maxW = 620;
-          const w = Math.min(maxW, img.naturalWidth || maxW);
-          const h = Math.round(w / ((img.naturalWidth || w) / (img.naturalHeight || 1)));
-          onAddFloatingElement('image', { src, width: w, height: h, aspectRatio: (img.naturalWidth || w) / (img.naturalHeight || 1) });
-        };
-        img.onerror = () => onAddFloatingElement('image', { src, width: 320, height: 240 });
-        img.src = src;
-      };
-      reader.readAsDataURL(file);
+      loadImageFile(file)
+        .then((img) => {
+          const { width, height } = floatDimsFor(img);
+          onAddFloatingElement('image', { src: img.src, width, height, aspectRatio: img.aspectRatio });
+        })
+        .catch(() => {
+          /* never block the user on a decode edge-case — inert box */
+          onAddFloatingElement('image', { src: '', width: 320, height: 240 });
+        });
     };
     input.click();
   };
@@ -476,7 +491,7 @@ export function Ribbon({
           button={{ icon: icon4(FilePlus), label: 'افزودن صفحه جدید', title: 'افزودن صفحه بلنک (بدون قاب) یا نوت‌بوکی (خط‌دار)' }}
           width={260}
         >
-          <PageTypePicker onPick={onAddPage} />
+          <PageTypePicker onPick={onAddPage} onPickSpecial={onOpenCoverInsert} />
         </RibbonDropdown>
       </RibbonGroup>
       <RibbonSeparator />
@@ -636,96 +651,63 @@ export function Ribbon({
             <RibbonMenuItem icon={icon4(Sigma)} label="معادله نمایشی" hint="خط مستقل وسط‌چین" onClick={() => ch().insertEquation({ display: true }).run()} />
           </div>
         </RibbonDropdown>
-        <RibbonDropdown
-          button={{ icon: icon4(BookOpen), label: 'کادر آموزشی', title: 'کادرهای آموزشی' }}
-          width={220}
-        >
-          <RibbonMenuItem icon={icon4(BookOpen)} label="تعریف" onClick={() => insertBlock(editor, { type: 'calloutBlock', attrs: { kind: 'definition' }, content: [{ type: 'paragraph' }] })} />
-          <RibbonMenuItem icon={icon4(Star)} label="نکته مهم" onClick={() => insertBlock(editor, { type: 'calloutBlock', attrs: { kind: 'important', title: 'نکته مهم' }, content: [{ type: 'paragraph' }] })} />
-          <RibbonMenuItem icon={icon4(HelpCircle)} label="نکته امتحانی" onClick={() => insertBlock(editor, { type: 'calloutBlock', attrs: { kind: 'exam', title: 'نکته امتحانی' }, content: [{ type: 'paragraph' }] })} />
-          <RibbonMenuItem icon={icon4(AlertCircle)} label="توجه" onClick={() => insertBlock(editor, { type: 'calloutBlock', attrs: { kind: 'warning', title: 'توجه' }, content: [{ type: 'paragraph' }] })} />
-          <RibbonMenuItem icon={icon4(Lightbulb)} label="مثال" onClick={() => insertBlock(editor, { type: 'exampleBlock', attrs: { title: '' }, content: [{ type: 'paragraph' }] })} />
-          <RibbonMenuItem icon={icon4(Hash)} label="اصطلاح کلیدی" onClick={() => insertBlock(editor, { type: 'keyTermBlock', attrs: { term: '' }, content: [{ type: 'paragraph' }] })} />
-          <RibbonMenuItem icon={icon4(CircleDot)} label="جعبه برجسته" onClick={() => insertBlock(editor, { type: 'highlightBox', attrs: { title: 'نکته برجسته', icon: '◉' }, content: [{ type: 'paragraph' }] })} />
-          <RibbonMenuItem icon={icon4(PenTool)} label="زمان‌خط" onClick={() => insertBlock(editor, { type: 'timeline', content: [{ type: 'paragraph' }] })} />
-          <RibbonMenuItem icon={icon4(Columns)} label="مقایسه دو ستونه" onClick={() => insertBlock(editor, { type: 'comparisonTable', content: [{ type: 'paragraph' }] })} />
-          <RibbonMenuItem icon={icon4(Columns)} label="موافق و مخالف" onClick={() => insertBlock(editor, { type: 'proConBlock', attrs: { topic: '' }, content: [{ type: 'paragraph' }] })} />
-          <RibbonMenuItem icon={icon4(Code)} label="کد با خروجی" onClick={() => insertBlock(editor, { type: 'codeOutputBlock', attrs: { lang: '', label: 'کد و خروجی' }, content: [{ type: 'paragraph' }] })} />
-        </RibbonDropdown>
-        {/* سوالات — منوی مستقل از کادر آموزشی؛ همان معماری بلوک‌ها (تم،
-            شخصی‌سازی، چاپ/PDF) */}
-        <RibbonDropdown
-          button={{ icon: icon4(HelpCircle), label: 'سوال', title: 'انواع سوال — تشریحی، درست/نادرست، چهارگزینه‌ای' }}
-          width={220}
-        >
-          <RibbonMenuItem icon={icon4(HelpCircle)} label="سوال کوتاه" hint="پاسخ کوتاه در همان کادر" onClick={() => insertBlock(editor, { type: 'questionBlock', attrs: { question: '' }, content: [{ type: 'paragraph' }] })} />
-          <RibbonMenuItem icon={icon4(PenTool)} label="سوال تشریحی" hint="با فضا برای پاسخ بلند" onClick={() => insertBlock(editor, { type: 'longAnswerBlock', attrs: { question: '', points: 0 }, content: [{ type: 'paragraph' }] })} />
-          <RibbonMenuItem icon={icon4(CheckCircle)} label="سوال درست / نادرست" hint="با دکمه‌های درست و نادرست" onClick={() => insertBlock(editor, { type: 'trueFalseBlock', attrs: { question: '', answer: 'none' }, content: [{ type: 'paragraph' }] })} />
-          <RibbonMenuItem icon={icon4(ListChecks)} label="سوال چهارگزینه‌ای" hint="۴ گزینه زیر هم یا دو ستون" onClick={() => insertBlock(editor, { type: 'mcqBlock', attrs: { qTitle: '', layout: 'stacked', options: ['', '', '', ''], correct: -1 }, content: [{ type: 'paragraph' }] })} />
-          <RibbonMenuItem icon={icon4(PenTool)} label="پاسخ تشریحی" hint="برگه پاسخ جدا" onClick={() => insertBlock(editor, { type: 'longAnswerBlock', attrs: { question: 'سوال تشریحی', points: 0 }, content: [{ type: 'paragraph' }] })} />
-        </RibbonDropdown>
+        <RibbonButton
+          title="افزودن کادر آموزشی — با پیش‌نمایش زنده"
+          label="کادر آموزشی"
+          icon={icon4(BookOpen)}
+          onClick={() => setInsertModal('edu')}
+        />
+        <RibbonButton
+          title="افزودن سوال — کوتاه، تشریحی، درست/نادرست، چهارگزینه‌ای"
+          label="سوال"
+          icon={icon4(HelpCircle)}
+          onClick={() => setInsertModal('question')}
+        />
+        {/* item 15: جلد اول/دوم/آخر + فهرست — moved to the طراحی tab (item
+            from user feedback). The quick-insert dropdowns were removed —
+            the modals are the only entry point now. */}
       </RibbonGroup>
     </>
   );
 
-  /* ═══════════════ TAB: طراحی ═══════════════ */
+  /** wrapper that dims a dropdown's items with an explanatory hint — used
+   *  by the طراحی tab when the active page's template ignores classic-frame
+   *  settings (the controls stay visible, only inert) */
+  const DisabledHint = ({ show, text, children }: { show: boolean; text: string; children: React.ReactNode }) =>
+    show ? (
+      <div className="px-1 py-1.5 text-[11px] leading-5 text-ink-400">{text}</div>
+    ) : (
+      <>{children}</>
+    );
+
+  /* ═══════════════ TAB: طراحی — بازطراحی اساسی (user request) ═══════════════
+     The old flat row (a <select> + two color dropdowns + steppers + two
+     text inputs squeezed beside each other) fought for attention and showed
+     classic-only controls greyed-out. The ENTIRE surface moved into the
+     «طراحی صفحه» modal: a visual template gallery (real rendered chrome per
+     card), a live A4 preview, and settings sections that show ONLY what the
+     selected template supports — the user works in the most comfortable
+     layout. The ribbon keeps one entry point + the unrelated edu-boxes.
+     All state flows through the SAME onBorderChange/onChangePageKind paths
+     the old controls used — autosave, collab and PDF export untouched. */
   const designTab = (
     <>
-      <RibbonGroup label="قاب صفحه">
+      <RibbonGroup label="صفحه">
         <RibbonButton
-          title={border.enabled ? 'غیرفعال کردن قاب' : 'فعال کردن قاب'}
-          label={border.enabled ? 'قاب فعال' : 'قاب خاموش'}
+          title="قالب، رنگ قاب، سربرگ درس و بازهٔ صفحات — در یک پنل کامل با پیش‌نمایش زنده"
+          label="طراحی صفحه…"
           icon={icon4(PanelsTopLeft)}
-          active={border.enabled}
-          onClick={() => onBorderChange({ enabled: !border.enabled })}
+          active={designModalOpen}
+          onClick={() => { setDesignModalOpen(true); }}
         />
-        <RibbonSelect
-          title="نوع قاب"
-          width={130}
-          value={border.style}
-          onChange={(v) => onBorderChange({ style: v as BorderStyle, enabled: v === 'none' ? false : true })}
-          options={BORDER_STYLES.map((s) => ({ value: s.value, label: s.label }))}
+        <RibbonButton
+          title="افزودن جلد اول/دوم/آخر یا صفحهٔ فهرست"
+          label="جلد / فهرست"
+          icon={icon4(Images)}
+          onClick={onOpenCoverInsert}
         />
-        <RibbonDropdown button={{ icon: icon4(Droplet), label: 'رنگ قاب', title: 'رنگ قاب' }} width={220}>
-          {BORDER_COLORS.map((c) => (
-            <RibbonMenuItem
-              key={c.label}
-              icon={<span className="flex gap-0.5"><span className="h-3 w-3 rounded-sm" style={{ background: c.primary }} /><span className="h-3 w-3 rounded-sm" style={{ background: c.secondary }} /></span>}
-              label={c.label}
-              onClick={() => onBorderChange({ primaryColor: c.primary, secondaryColor: c.secondary, enabled: true })}
-            />
-          ))}
-        </RibbonDropdown>
-        <RibbonDropdown button={{ icon: icon4(Droplet), label: 'رنگ خط میانی', title: 'رنگ نوار میانی قاب (آبی یخی)' }} width={220}>
-          {FILL_COLORS.map((c) => (
-            <RibbonMenuItem
-              key={c.label}
-              icon={<span className="h-3 w-3 rounded-sm" style={{ background: c.value === 'none' ? 'transparent' : c.value, boxShadow: c.value === 'none' ? 'inset 0 0 0 1px rgba(0,0,0,0.25)' : 'inset 0 0 0 1px rgba(0,0,0,0.1)' }} />}
-              label={c.label}
-              onClick={() => onBorderChange({ fillColor: c.value })}
-            />
-          ))}
-        </RibbonDropdown>
-        <RibbonButton title="ضخامت کمتر" icon={icon4(Minus)} onClick={() => onBorderChange({ thickness: Math.max(0.5, border.thickness - 0.5) })} />
-        <span className="flex h-8 min-w-14 items-center justify-center text-[12px] font-semibold tabular-nums text-ink-600 dark:text-ink-300">ضخامت {faDigits(border.thickness)}</span>
-        <RibbonButton title="ضخامت بیشتر" icon={icon4(Plus)} onClick={() => onBorderChange({ thickness: Math.min(3, border.thickness + 0.5) })} />
-        <label
-          title="متن عمودی سمت چپ قاب"
-          className="flex h-8 items-center gap-1.5 rounded-md px-2 text-[12px] text-ink-600 transition-colors hover:bg-ink-100 dark:text-ink-300 dark:hover:bg-ink-800"
-        >
-          متن قاب
-          <input
-            type="text"
-            value={border.sideLabel ?? ''}
-            placeholder="پیش‌فرض"
-            dir="rtl"
-            onChange={(e) => onBorderChange({ sideLabel: e.target.value })}
-            className="h-7 w-28 rounded-md border border-ink-200 bg-transparent px-2 text-[12px] outline-none placeholder:text-ink-400 focus:border-[#0070f3] dark:border-ink-700"
-          />
-        </label>
       </RibbonGroup>
       <RibbonSeparator />
-
       <RibbonGroup label="کادرهای آموزشی">
         <RibbonButton
           title="شخصی‌سازی کادرهای آموزشی — استایل، رنگ و پیش‌نمایش زنده"
@@ -733,10 +715,6 @@ export function Ribbon({
           label={`کادرها: ${eduBlocks.base === 'minimal' ? 'حداقلی' : 'رنگی'}`}
           onClick={onOpenEduBlocks}
         />
-      </RibbonGroup>
-
-      <RibbonGroup label="صفحه">
-        <RibbonButton title="تنظیمات حاشیه/اندازه چاپ (A4 عمودی ثابت)" icon={icon4(Settings)} label="تنظیمات صفحه" onClick={onOpenPrintPreview} />
       </RibbonGroup>
     </>
   );
@@ -853,9 +831,10 @@ export function Ribbon({
               { id: 'review', label: 'بازبینی' },
             ]}
           />
-          {/* account chip — AFTER the last tab (بازبینی). Circular avatar,
+          {/* account chip — item ۴: after the status chips at the far-left
+              cluster (the old tab-side position is gone). Circular avatar,
               monochrome ring states (see the Wiki). */}
-          <div className="flex items-center gap-2 pb-1.5 pt-1">
+          <div className="flex items-center gap-2 border-l border-ink-100 pl-1.5 pr-1 dark:border-ink-800">
             <AccountChip
               name={user?.name}
               email={user?.email}
@@ -864,6 +843,12 @@ export function Ribbon({
               avatarPreset={settings?.avatarPreset}
               onOpen={() => navigate('/settings?tab=account')}
             />
+            {/* persistent save-status chip (§6) — THIS document's state only,
+                from the one centralized SaveState machine; no toasts on save */}
+            <SaveStatusBadge state={saveState} />
+            {/* collaboration presence (ویرایشگران ۲/۴ + connection dot) — only
+                when the note is a live group-collaboration session */}
+            {collabPresence}
           </div>
         </div>
         {/* contextual tabs — generated from the resolved selection context
@@ -884,66 +869,23 @@ export function Ribbon({
             </div>
           </div>
         )}
-        {/* far-left cluster: فایل + undo/redo + AI button + search + focus.
-            آیتم ۹: فایل/برگردان/بازگردانی از کنار تب‌ها به این خوشه منتقل
-            شدند (کنار هوش مصنوعی) تا همهٔ دستورات سند یک‌جا باشند. */}
+        {/* far-left cluster: فایل (leftmost) + focus. جابه‌جایی بر اساس
+            بازخورد: برگردان/بازگردانی به سمت راستِ خوشه (کنار چیپ‌های وضعیت
+            و جست‌وجو) رفتند — دکمه‌های کوارتزیِ پرتکرار نزدیک کارِ روزمره؛
+            تمرکز و فایل کم‌کارتر و در لبهٔ چپ ماندند. The AI button was
+            REMOVED from the ribbon — the AI panel opens from the دستیار tab
+            beside the page previews (Ctrl+Shift+A still works). */}
         <div className="flex shrink-0 items-center gap-1 pl-1">
-          <FileMenu items={fileMenuItems} open={fileOpen} onToggle={() => setFileOpen((v) => !v)} onClose={() => setFileOpen(false)} />
+          {/* حالت تمرکز + فایل — the quiet edge cluster (leftmost) */}
+          <RibbonButton title="حالت تمرکز (Ctrl+Shift+F)" icon={icon4(Focus)} onClick={onToggleFocus} />
+          <div className="flex items-center border-l border-ink-100 pl-1.5 dark:border-ink-800">
+            <FileMenu items={fileMenuItems} open={fileOpen} onToggle={() => setFileOpen((v) => !v)} onClose={() => setFileOpen(false)} />
+          </div>
+          {/* برگردان/بازگردانی — relocated beside the status/search cluster */}
           <div className="flex items-center gap-0.5 border-l border-ink-100 pl-1.5 pr-1 dark:border-ink-800">
             <RibbonButton title="برگردان (Ctrl+Z)" icon={icon4(Undo)} onClick={() => ch().undo().run()} />
             <RibbonButton title="بازگردانی (Ctrl+Shift+Z)" icon={icon4(Redo)} onClick={() => ch().redo().run()} />
           </div>
-          {/* persistent save-status chip (§6) — THIS document's state only,
-              from the one centralized SaveState machine; no toasts on save */}
-          <SaveStatusBadge state={saveState} />
-          {/* collaboration presence (ویرایشگران ۲/۴ + connection dot) — only
-              when the note is a live group-collaboration session */}
-          {collabPresence}
-          {/* حالت تمرکز — moved here (next to the AI button) from the former نمایش tab (آیتم ۱۵: merged into بازبینی) */}
-          <RibbonButton title="حالت تمرکز (Ctrl+Shift+F)" icon={icon4(Focus)} onClick={onToggleFocus} />
-          {/* جستجو و جایگزینی — dropdown panel from the toolbar icon itself
-              (replaces the old floating search box above the editor) */}
-          <RibbonPanel
-            button={{ icon: icon4(Search), title: 'جستجو و جایگزینی (Ctrl+F)', active: findOpen }}
-            width={430}
-            open={findOpen}
-            onOpen={() => setFindOpen(true)}
-            onClose={() => setFindOpen(false)}
-          >
-            <FindPanel editor={editor} onClose={() => setFindOpen(false)} panelWidth={402} showReplace={findReplace} onShowReplaceChange={setFindReplace} />
-          </RibbonPanel>
-          {/* BUG-4 fix: real TOGGLE — the AI button opens the panel when it
-              is closed AND CLOSES it when open (its active state follows
-              aiOpen via this prop). The old always-onOpen handler made the
-              second click a no-op while the panel was open. */}
-          <button
-            type="button"
-            onClick={onToggleSidebar ?? onOpenAIPanel}
-            aria-pressed={aiPanelOpen}
-            aria-label="دستیار هوش مصنوعی"
-            title="دستیار هوش مصنوعی (Ctrl+Shift+A / Alt+S)"
-            className={`flex h-7 items-center rounded-lg px-3 text-[12px] font-semibold transition-all ${
-              aiPanelOpen
-                ? 'bg-ink-100 text-accent-700 ring-1 ring-accent-500/50 dark:bg-ink-800 dark:text-accent-300'
-                : 'bg-gradient-to-l from-accent-600 to-accent-500 text-white hover:opacity-90 dark:from-accent-400 dark:to-accent-500 dark:text-ink-950'
-            }`}
-          >
-            {/* AI mark — bigger, two-star sparkle composition with a soft
-                drop shadow so the badge reads at a glance inside the button */}
-            <svg
-              width="17"
-              height="17"
-              viewBox="0 0 24 24"
-              fill="currentColor"
-              aria-hidden="true"
-              style={{ filter: aiPanelOpen ? 'none' : 'drop-shadow(0 0 3px rgba(255,255,255,0.35))' }}
-            >
-              <path d="M11 2l2.1 6.4L19.5 10l-6.4 1.6L11 18l-2.1-6.4L2.5 10l6.4-1.6L11 2z" />
-              <path d="M18.5 14l1 3 3 1-3 1-1 3-1-3-3-1 3-1 1-3z" />
-            </svg>
-            {/* item ۱۳: icon-only (label removed) — the tooltip above carries
-                the full name + shortcut, and aria-label keeps it accessible */}
-          </button>
         </div>
       </div>
 
@@ -954,6 +896,39 @@ export function Ribbon({
       >
         {toolRow}
       </div>
+
+      {/* درج کادر آموزشی / سوال — redesigned modal with live preview */}
+      <InsertBlockModal
+        open={insertModal !== null}
+        mode={insertModal ?? 'edu'}
+        onClose={() => setInsertModal(null)}
+        onInsert={(k) => {
+          if (k.mode === 'edu') {
+            insertBlock(editor, { type: 'calloutBlock', attrs: { kind: k.kind, title: '' }, content: [{ type: 'paragraph' }] });
+          } else if (k.kind === 'short') {
+            insertBlock(editor, { type: 'questionBlock', attrs: { question: '' }, content: [{ type: 'paragraph' }] });
+          } else if (k.kind === 'long') {
+            insertBlock(editor, { type: 'longAnswerBlock', attrs: { question: '', points: 0 }, content: [{ type: 'paragraph' }] });
+          } else if (k.kind === 'truefalse') {
+            insertBlock(editor, { type: 'trueFalseBlock', attrs: { question: '', answer: 'none' }, content: [{ type: 'paragraph' }] });
+          } else {
+            insertBlock(editor, { type: 'mcqBlock', attrs: { qTitle: '', layout: 'stacked', options: ['', '', '', ''], correct: -1 }, content: [{ type: 'paragraph' }] });
+          }
+          setInsertModal(null);
+        }}
+      />
+
+      {/* مودال «طراحی صفحه» — the redesigned design surface */}
+      <PageDesignModal
+        open={designModalOpen}
+        onClose={() => setDesignModalOpen(false)}
+        border={border}
+        onBorderChange={onBorderChange}
+        activePageKind={activePageKind}
+        onChangePageKind={onChangePageKind ?? (() => {})}
+        onOpenPageRange={onOpenPageRange}
+        onOpenCoverInsert={onOpenCoverInsert}
+      />
     </div>
   );
 }

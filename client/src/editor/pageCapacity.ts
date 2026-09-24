@@ -23,8 +23,63 @@ export const A4_H_PX = 1123;
 export const FRAMED_PADDING = { top: 30, right: 32, bottom: 30, left: 32 } as const;
 /** blank / notebook sheet padding — .page-blank / .page-notebook */
 export const PLAIN_PADDING = { top: 38, right: 38, bottom: 38, left: 38 } as const;
-
 import type { PageKind } from '@/types';
+
+/* ── booklet frame geometry — THE one booklet template contract ─────────
+   Every booklet consumer (chrome SVG, sheet padding, float bounds, export
+   paddings) derives its numbers from this object; no hand-copied values.
+   Declared BEFORE BOOKLET_PADDING so that constant derives from it.
+
+   The layout idea matches the reference sheet: a fine double frame close
+   to the paper edge, content starting a comfortable AIR inside the inner
+   line, and a fixed ornament slot reserved along the right mid-edge
+   (the rotated 007.png art) — the writing area subtracts the slot so text
+   can NEVER run under/over it, whatever the user types. */
+export const BOOKLET_GEOMETRY = {
+  /** outer frame line inset from the sheet edge (px) */
+  frameInset: 18,
+  /** gap between outer and inner frame lines (px) */
+  frameGap: 6,
+  /** universal breathing room between the writable area and the frame / right
+   *  ornament (px) — the SAME air on every side, by design */
+  safeAir: 10,
+  /** right ornament slot width (px) — the rotated 007.png art seat; only
+   *  its ~13px ink width rides the border band, so the text reserve needs
+   *  just slot + air beyond the outer line */
+  rightOrnW: 20,
+} as const;
+
+/** inner frame line inset (px) — the second, finer rule of the double frame */
+export const BOOKLET_INNER_INSET =
+  BOOKLET_GEOMETRY.frameInset + BOOKLET_GEOMETRY.frameGap;
+/** booklet (خیلی سبز) sheet padding — .page-booklet
+ *  SINGLE SOURCE OF TRUTH: the booklet safe area is DERIVED from the frame
+ *  geometry above, not hand-tuned — the writable box is the area between
+ *  the inner frame line (L) and a breathing inset (AIR). The right edge
+ *  clears only the LOGO'S REAL INK, not the whole slot: the art's ink is a
+ *  13px stripe riding the frame band ((M+L)/2 centerline — measured ink
+ *  box in PageBorder.buildBookletArt), so reserving the full slot+air (48)
+ *  wasted ~10px of writing width and left the sheet visibly lopsided.
+ *  right = outer line + slot/2 + AIR clears the ink's left edge by AIR
+ *  exactly (ink left ≈ BW − M − slot/2 − 6.5). Symmetry: left uses L+AIR,
+ *  right uses M+slot/2+AIR — a 4px optical difference, not a column.
+ *  All three mirrors (index.css .page-booklet,
+ *  pageModelExport.PAD_OF, pageContentBounds) read the same numbers. */
+export const BOOKLET_PADDING = {
+  top: BOOKLET_INNER_INSET + BOOKLET_GEOMETRY.safeAir,
+  /* right = outer line + HALF the ornament slot + AIR — the ink stripe is
+     centered in the slot, so half a slot is all the text must respect */
+  right: BOOKLET_GEOMETRY.frameInset + BOOKLET_GEOMETRY.rightOrnW / 2 + BOOKLET_GEOMETRY.safeAir,
+  bottom: BOOKLET_INNER_INSET + BOOKLET_GEOMETRY.safeAir,
+  left: BOOKLET_INNER_INSET + BOOKLET_GEOMETRY.safeAir,
+} as const;
+/** the exact writable rectangle of a booklet sheet (CSS px) — text layout
+ *  AND floating-object bounds both flow from this one box, so they can
+ *  never disagree; right edge sits left of the reserved ornament slot */
+export function bookletContentRect(): { x: number; y: number; w: number; h: number } {
+  const p = BOOKLET_PADDING;
+  return { x: p.left, y: p.top, w: A4_W_PX - p.left - p.right, h: A4_H_PX - p.top - p.bottom };
+}
 
 /** Usable content box of a sheet (CSS px) — the writable A4 area. */
 export interface PageContentBounds {
@@ -33,6 +88,10 @@ export interface PageContentBounds {
 }
 
 export function pageContentBounds(kind: PageKind = 'framed'): PageContentBounds {
+  if (kind === 'booklet') {
+    const r = bookletContentRect();
+    return { width: r.w, height: r.h };
+  }
   const p = kind === 'framed' ? FRAMED_PADDING : PLAIN_PADDING;
   return {
     width: A4_W_PX - p.left - p.right,
@@ -43,9 +102,11 @@ export function pageContentBounds(kind: PageKind = 'framed'): PageContentBounds 
 /** THE one authoritative inset policy per page kind — consumed by the
  *  floating-object layer (movement/resize bounds) and by any future surface
  *  that needs the usable box. Keep in sync with index.css `.page-*` padding:
- *  framed 30/32, blank 38, notebook 38. */
+ *  framed 30/32, blank 38, notebook 38, booklet 34/36/34/34. */
 export function pagePadding(kind: PageKind = 'framed'): { top: number; right: number; bottom: number; left: number } {
-  return kind === 'framed' ? { ...FRAMED_PADDING } : { ...PLAIN_PADDING };
+  if (kind === 'framed') return { ...FRAMED_PADDING };
+  if (kind === 'booklet') return { ...BOOKLET_PADDING };
+  return { ...PLAIN_PADDING };
 }
 
 /* ── object-area policy ─────────────────────────────────────────────────

@@ -9,7 +9,7 @@ import {
   Table as TableIcon, Trash2, SquareDashedBottom,
   ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
   Palette, Rows3, AlignVerticalJustifyStart, AlignVerticalJustifyCenter,
-  AlignVerticalJustifyEnd, Highlighter, SwatchBook,
+  AlignVerticalJustifyEnd, Highlighter, SwatchBook, Grid3x3,
 } from 'lucide-react';
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -30,6 +30,9 @@ const TABLE_NODES = new Set(['table', 'tableRow', 'tableCell', 'tableHeader']);
 interface TableAttrs extends Record<string, unknown> {
   editor: import('@tiptap/core').Editor;
 }
+
+/* رنگ پیش‌فرض گرید — باید با index.css/printCss یکی باشد */
+export const DEFAULT_GRID_COLOR = '#b9a7e0';
 
 function capabilities(): ObjectCapabilities {
   return {
@@ -210,7 +213,11 @@ function designGroups(ed: Editor): ContextualGroup[] {
               <button
                 key={p.id}
                 type="button"
-                onClick={() => setTableAttrs(ed, p.attrs)}
+                /* apply the preset WITHOUT touching gridColor — the user's
+                   chosen «رنگ خطوط» used to be wiped by every preset pick
+                   (gridColor fell back to the default purple and the picker
+                   appeared broken) */
+                onClick={() => setTableAttrs(ed, { ...p.attrs, gridColor: (table?.node.attrs.gridColor as string | null) ?? null })}
                 className={`flex items-center gap-2.5 rounded-lg p-1.5 text-right transition-colors ${
                   active
                     ? 'bg-accent-50 dark:bg-accent-900/30'
@@ -225,6 +232,60 @@ function designGroups(ed: Editor): ContextualGroup[] {
               </button>
             );
           })}
+        </div>
+      ),
+    },
+  };
+
+  /* «رنگ خطوط» — گرید بین سلول‌ها؛ پیش‌فرض بنفش سیستم، none = بدون خط */
+  const grid = (table?.node.attrs.gridColor as string | null) ?? null;
+  const GRID_COLORS: Array<{ c: string | null; label: string }> = [
+    { c: null, label: 'بنفش پیش‌فرض' },
+    { c: 'none', label: 'بدون خط' },
+    { c: '#171717', label: 'مشکی' },
+    { c: '#52525b', label: 'خاکستری' },
+    { c: '#2563eb', label: 'آبی' },
+    { c: '#16a34a', label: 'سبز' },
+    { c: '#dc2626', label: 'قرمز' },
+    { c: '#d97706', label: 'نارنجی' },
+  ];
+  const gridPicker: ContextualDropdown = {
+    key: 'tbl.des.grid.picker',
+    title: 'رنگ خطوط بین سلول‌ها',
+    label: 'رنگ خطوط',
+    icon: (
+      <span className="flex flex-col items-center leading-none">
+        <span className="inline-block h-3.5 w-3.5 rounded-[4px] border" style={{ background: grid && grid !== 'none' ? grid : '#b9a7e0', borderColor: grid && grid !== 'none' ? grid : '#b9a7e0' }} />
+      </span>
+    ),
+    dropdown: {
+      width: 208,
+      render: () => (
+        <div className="grid grid-cols-4 gap-1 p-1">
+          {GRID_COLORS.map(({ c, label }) => (
+            <button
+              key={label}
+              type="button"
+              title={label}
+              aria-label={label}
+              aria-pressed={(grid ?? null) === c}
+              onClick={() => setTableAttrs(ed, { gridColor: c })}
+              className={`flex h-9 items-center justify-center rounded-lg border transition-colors ${
+                (grid ?? null) === c
+                  ? 'border-accent-500 ring-1 ring-accent-500/40'
+                  : 'border-ink-200 hover:border-ink-300 dark:border-ink-700 dark:hover:border-ink-600'
+              }`}
+            >
+              <span
+                aria-hidden="true"
+                className="h-5 w-5 rounded-md"
+                style={{
+                  background: c && c !== 'none' ? c : 'transparent',
+                  border: c && c !== 'none' ? '1px solid rgba(0,0,0,0.14)' : '1px dashed rgba(0,0,0,0.35)',
+                }}
+              />
+            </button>
+          ))}
         </div>
       ),
     },
@@ -292,6 +353,7 @@ function designGroups(ed: Editor): ContextualGroup[] {
   return [
     { key: 'tbl.preset', label: 'قالب آماده', tools: [presetPicker] },
     { key: 'tbl.des.structure', label: 'ساختار', tools: structure },
+    { key: 'tbl.des.grid', label: 'رنگ خطوط', tools: [gridPicker] },
     { key: 'tbl.des.palette', label: 'رنگ سلول', tools: [colorPicker] },
     { key: 'tbl.des.valign', label: 'تراز عمودی', tools: valign },
   ];

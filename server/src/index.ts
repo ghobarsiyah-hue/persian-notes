@@ -146,6 +146,23 @@ async function main() {
 }
 
 main().catch((err) => {
+  /* EADDRINUSE is by far the most common «سرور ران نمی‌شود» cause: a previous
+     dev session (or a second copy of the repo) still owns the port. Say it
+     plainly instead of a raw stack trace nobody can act on. */
+  const msg = (err as { message?: string; code?: string }).message ?? '';
+  const code = (err as { code?: string }).code;
+  if (code === 'EADDRINUSE' || msg.includes('EADDRINUSE') || msg.includes('listen EADDR')) {
+    console.error(
+      [`✗ پورت ${env.port} اشغال است — یک نسخهٔ دیگر از سرور احتمالاً هنوز در حال اجراست.`,
+       '  کافیه آن ترمینال/پروسه را ببندید (Ctrl+C) و دوباره npm run dev بزنید.',
+       '  اگر پروسه را پیدا نمی‌کنید:',
+       `  • ویندوز:  netstat -ano | findstr :${env.port}  سپس  taskkill /PID <شماره> /F`,
+       `  • مک/لینوکس:  lsof -ti :${env.port} | xargs kill -9`,
+       '  • یا برای این اجرا پورت دیگری بدهید:  PORT=4001 npm run dev',
+      ].join('\n'),
+    );
+    process.exit(1);
+  }
   console.error('✗ سرور شروع نشد:', err);
   process.exit(1);
 });

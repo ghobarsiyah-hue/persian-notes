@@ -4,9 +4,20 @@ import { GroupAvatar } from '@/components/groups/GroupAvatar';
 import { groupsApi } from '@/api/endpoints';
 import { useApp } from '@/store/AppProvider';
 import { emitUserEvent } from '@/events/userEvents';
+import { loadAvatarFile } from '@/utils/imageFile';
 import type { Group } from '@/types';
 
-const MAX_AVATAR_BYTES = 150 * 1024;
+/** همان پالت تنظیمات گروه — null = اکسان سیستم */
+const ACCENT_CHOICES: Array<{ c: string | null; label: string }> = [
+  { c: null, label: 'پیش‌فرض' },
+  { c: '#7c3aed', label: 'بنفش' },
+  { c: '#2563eb', label: 'آبی' },
+  { c: '#0d9488', label: 'سبزآبی' },
+  { c: '#16a34a', label: 'سبز' },
+  { c: '#d97706', label: 'نارنجی' },
+  { c: '#dc2626', label: 'قرمز' },
+  { c: '#db2777', label: 'صورتی' },
+];
 
 /**
  * Create Group — one calm flow that matches the site's identity: the SAME
@@ -28,6 +39,7 @@ export function CreateGroupModal({
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [avatar, setAvatar] = useState<string | null>(null);
+  const [accent, setAccent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -36,23 +48,23 @@ export function CreateGroupModal({
     setName('');
     setDescription('');
     setAvatar(null);
+    setAccent(null);
     setError(null);
   };
 
   const pickAvatar = (file: File | undefined) => {
     setError(null);
     if (!file) return;
-    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
-      setError('قالب تصویر باید PNG یا JPG باشد.');
+    if (!file.type.startsWith('image/')) {
+      setError('فایل انتخاب‌شده تصویر نیست.');
       return;
     }
-    if (file.size > MAX_AVATAR_BYTES) {
-      setError('حجم تصویر باید کمتر از ۱۵۰ کیلوبایت باشد.');
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => setAvatar(String(reader.result));
-    reader.readAsDataURL(file);
+    /* no manual cap — loadAvatarFile auto-fits under the server budget */
+    setBusy(true);
+    loadAvatarFile(file)
+      .then((url) => setAvatar(url))
+      .catch((e) => setError((e as Error).message))
+      .finally(() => setBusy(false));
   };
 
   const create = async (e?: FormEvent) => {
@@ -70,6 +82,7 @@ export function CreateGroupModal({
         name: trimmed,
         description: description.trim() || undefined,
         avatar,
+        accentColor: accent,
       });
       toast(`گروه «${group.name}» ساخته شد. شما مالک آن هستید.`, 'success');
       emitUserEvent('group.created', { targetType: 'group', targetId: group.id, metadata: { name: group.name } });
@@ -121,6 +134,38 @@ export function CreateGroupModal({
             className="w-full resize-none rounded-lg bg-transparent px-3 py-2 text-sm leading-6 shadow-ring transition-shadow focus-visible:shadow-focus dark:bg-ink-900 dark:text-ink-100"
           />
         </Field>
+
+        <div>
+          <span className="mb-1.5 block text-sm font-medium text-ink-700 dark:text-ink-300">رنگ گروه</span>
+          <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="رنگ گروه">
+            {ACCENT_CHOICES.map(({ c, label }) => {
+              const active = accent === c;
+              return (
+                <button
+                  key={label}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  title={label}
+                  aria-label={label}
+                  disabled={busy}
+                  onClick={() => setAccent(c)}
+                  className={`flex h-8 w-8 items-center justify-center rounded-full border transition-colors ${
+                    active
+                      ? 'border-ink-900 ring-2 ring-ink-900/20 dark:border-white dark:ring-white/30'
+                      : 'border-black/10 hover:border-black/25 dark:border-white/15 dark:hover:border-white/35'
+                  }`}
+                >
+                  <span
+                    aria-hidden="true"
+                    className="h-5 w-5 rounded-full"
+                    style={{ background: c ?? 'linear-gradient(135deg,#7c3aed 0%,#2563eb 100%)' }}
+                  />
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
         <div>
           <span className="mb-1.5 block text-sm font-medium text-ink-700 dark:text-ink-300">تصویر گروه (اختیاری)</span>

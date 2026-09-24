@@ -5,7 +5,7 @@ import type {
 import { h4 } from '../icons';
 import type { Editor } from '@tiptap/core';
 import { Copy, Trash2, Repeat, GraduationCap, BookOpen, Star, AlertCircle, HelpCircle, Hash, FlaskConical, Lightbulb, Paintbrush, Palette, CheckCircle, ListChecks } from 'lucide-react';
-import { openEduBlockStyleModal } from './eduBlockStyleModalHost';
+import { openEduBlockStyleModal, openEduQuestionStyleModal } from './eduBlockStyleModalHost';
 
 /* ══════════════════════════════════════════════════════════════════════════
    EduBlock context — the dedicated tab for the کادرهای آموزشی family
@@ -411,14 +411,24 @@ function groups(a: EduBlockAttrs): ContextualGroup[] {
         } as ContextualGroup]
       : []),
 
-    /* ── شخصی‌سازی — per-block visual modal ── */
+    /* ── شخصی‌سازی — TWO modals, one per design axis (item: box options
+        must not land on question boxes): question families get the
+        QUESTION modal (قالب/نمره/پاسخ/اکسان/چیپ/فاصله) IN ADDITION to the
+        shared BOX modal (تیتر/متن/بوردر/پس‌زمینه); every other block only
+        offers the box one. Nested boxes (سوال داخل نکته) keep working —
+        each modal targets the node the selection resolves to. ── */
     {
       key: 'edu.style',
-      label: 'شخصی‌سازی این کادر',
+      label: 'شخصی‌سازی',
       tools: [
-        act('edu.style.open', 'شخصی‌سازی این کادر — تیتر، متن، بوردر، پس‌زمینه', h4(Paintbrush), () => {
+        ...(QUIZ_TYPES.has(eduType)
+          ? [act('edu.qstyle.open', 'شخصی‌سازی سوال — قالب، نمره، چیدمان گزینه‌ها، اکسان، جایگاه پاسخ', h4(Palette), () => {
+              openEduQuestionStyleModal(ed);
+            }, 'شخصی‌سازی سوال…')]
+          : []),
+        act('edu.style.open', 'شخصی‌سازی کادر — تیتر، متن، بوردر، پس‌زمینه', h4(Paintbrush), () => {
           openEduBlockStyleModal(ed);
-        }, 'شخصی‌سازی…'),
+        }, 'شخصی‌سازی کادر…'),
       ],
     },
 

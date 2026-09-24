@@ -32,17 +32,33 @@ const AVATAR_SCHEMA = z
   .regex(/^data:image\/(png|jpeg|webp);base64,/, 'قالب تصویر پشتیبانی نمی‌شود')
   .refine((v) => Buffer.byteLength(v, 'utf8') <= 150 * 1024, 'حجم تصویر باید کمتر از ۱۵۰ کیلوبایت باشد');
 
+/* hex accent color (#rgb/#rrggbb) — null resets to the system accent */
+const ACCENT_SCHEMA = z
+  .string()
+  .regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, 'رنگ باید به فرمت HEX باشد')
+  .nullable()
+  .optional();
+
 const createSchema = z.object({
   name: z.string().trim().min(2, 'نام گروه باید حداقل ۲ حرف باشد').max(80),
   description: z.string().max(500).optional(),
   avatar: AVATAR_SCHEMA.nullable().optional(),
+  accentColor: ACCENT_SCHEMA,
 });
+
+/* security model (تنظیمات امنیتی) — whitelist enums; the service projects
+   them into the settings bag; defaults stay 'invite'/'members' (safe) */
+const joinPolicySchema = z.enum(['invite', 'open']).optional();
+const contentPolicySchema = z.enum(['members', 'public']).optional();
 
 const updateSchema = z
   .object({
     name: z.string().trim().min(2, 'نام گروه باید حداقل ۲ حرف باشد').max(80).optional(),
     description: z.string().max(500).optional(),
     avatar: AVATAR_SCHEMA.nullable().optional(),
+    accentColor: ACCENT_SCHEMA,
+    joinPolicy: joinPolicySchema,
+    contentPolicy: contentPolicySchema,
   })
   .refine((d) => Object.keys(d).length > 0, { message: 'داده‌ای برای بروزرسانی ارسال نشده است.' });
 

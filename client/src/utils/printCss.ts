@@ -178,7 +178,7 @@ export function printCss(options: ExportOptionsCss): string {
      cell edges in the print fragment renderer — the visible symptom was
      tables whose inner gridlines vanished while the outer edge survived.
      border-radius is sacrificed on paper (no clipping needed anyway). */
-  .pn-sheet-content table { border-collapse: collapse; table-layout: fixed; width: 100%; margin: 0.6em 0; }
+  .pn-sheet-content table { border-collapse: collapse; table-layout: fixed; width: 100%; margin: 0.6em 0; /* گوشه‌های گرد — هم‌ادیتور: با border-radius خودِ table */ border-radius: 8px; }
   /* kept from index.css 1:1: min-width floor — the EDITOR allows dragging
      a table narrow (min-width:120px); print honors whatever width was set
      via the width attribute below, but a shrunken table still floors at
@@ -195,7 +195,19 @@ export function printCss(options: ExportOptionsCss): string {
      Print lines must be SOLID print-safe colors at a full px. #d4d4d8 ≈
      the same visual weight as 8% black over white, but opaque → the grid
      always reaches the PDF. Header/striping colors were already solid. */
-  .pn-sheet-content table td, .pn-sheet-content table th { border: 1px solid #d4d4d8; padding: 8px 12px; vertical-align: top; /* BUG-1: opaque surface — notebook ruling must not show through cells */ background: #ffffff; }
+  /* جدول: گرید پیش‌فرض بنفش سیستم؛ رنگ سفارشی از --pn-grid (که renderHTML و
+     NodeView به‌صورت inline روی خود table می‌گذارند) می‌آید — همان رنگ در
+     ادیتور و PDF. transparent = data-grid="none" (بدون خط) */
+  .pn-sheet-content table td, .pn-sheet-content table th { border: 1px solid #b9a7e0; padding: 8px 12px; vertical-align: top; /* BUG-1: opaque surface — notebook ruling must not show through cells */ background: #ffffff; }
+  /* گرید — table[data-tstyle][data-grid] variants MUST stay AFTER the
+     tstyle rules below them in cascade weight (same trick as index.css:
+     the preset templates used to swallow the grid color). These sit right
+     before the templates AND carry the higher specificity, so they win
+     regardless of file order. */
+  .pn-sheet-content table[data-grid] td, .pn-sheet-content table[data-grid] th { border-color: var(--pn-grid, #b9a7e0); }
+  .pn-sheet-content table[data-tstyle][data-grid] td, .pn-sheet-content table[data-tstyle][data-grid] th { border-color: var(--pn-grid, #b9a7e0); }
+  .pn-sheet-content table[data-tstyle][data-grid='none'] td, .pn-sheet-content table[data-tstyle][data-grid='none'] th { border-color: transparent; }
+  .pn-sheet-content table[data-grid='none'] td, .pn-sheet-content table[data-grid='none'] th { border-color: transparent; }
   .pn-sheet-content table th { background: #fafafa; color: #171717; font-weight: 600; font-size: 0.9em; }
   /* ── table design (طراحی جدول) — index.css 1:1 ──
      print-color-adjust: exact — WITHOUT it Chrome's default print
@@ -465,6 +477,21 @@ export function printCss(options: ExportOptionsCss): string {
   .pn-sheet-content .edu-mcq[data-qv="v12"] .quiz-opt-num { background: transparent; color: var(--q-accent, #171717); font-weight: 800; border-radius: 2px; }
   .pn-sheet-content .edu-mcq[data-qv="v12"] .quiz-opt[data-correct="true"] { background: #f2fbf5; box-shadow: inset 0 0 0 1.5px rgba(22, 163, 74, 0.5); }
   .pn-sheet-content .edu-mcq[data-qv="v12"] .quiz-opt[data-correct="true"] .quiz-opt-num { color: #16a34a; }
+
+  /* ── variant coverage for تشریحی/سوال کوتاه (v4/v6/v8/v11) — print mirror
+     of index.css; opaque fills + color-adjust exact ── */
+  .pn-sheet-content .edu-longanswer[data-qv="v4"],
+  .pn-sheet-content .edu-question[data-qv="v4"] { box-shadow: none; border-right-color: transparent; background: #f4f4f5; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .pn-sheet-content .edu-longanswer[data-qv="v6"],
+  .pn-sheet-content .edu-question[data-qv="v6"] { border-radius: 14px; }
+  .pn-sheet-content .edu-longanswer[data-qv="v8"],
+  .pn-sheet-content .edu-question[data-qv="v8"] { border-right: 3px solid var(--q-accent, #0070f3); border-radius: 4px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .pn-sheet-content .edu-longanswer[data-qv="v8"] .edu-title,
+  .pn-sheet-content .edu-question[data-qv="v8"] .edu-title { color: var(--q-accent, #0070f3); }
+  .pn-sheet-content .edu-longanswer[data-qv="v11"] .edu-body > p,
+  .pn-sheet-content .edu-question[data-qv="v11"] .edu-body > p { border-bottom: 1px dotted rgba(0, 0, 0, 0.28); }
+  .pn-sheet-content .edu-truefalse[data-qv="v8"] .edu-title { color: var(--q-accent, #0070f3); }
+  .pn-sheet-content .edu-truefalse[data-qv="v11"] .quiz-tf-btn { padding: 5px 18px; }
 
   /* ── per-block tuning mirrors (chip shape / spacing) ── */
   .pn-sheet-content .edu-mcq[data-chip="square"] .quiz-opt-num,

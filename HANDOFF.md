@@ -114,6 +114,8 @@ client/src
                       RightPanel (AI + metadata), AIDiffModal, EduBlocksModal, VersionsModal,
                       SelectPopover, ColorPalette, BotAvatar (fallback avatars)
     border/           PageBorder.tsx — ornamental SVG frame + page number
+                        + the booklet page template (BookletChrome,
+                        bookletSvgString — قالب جزوه, see §4b)
     export/           PrintPreviewModal + PreviewBody
     groups/           CreateGroupModal, GroupNotesPanel, GroupMembersPanel, GroupSettingsPanel, GroupAvatar
     layout/           AppLayout.tsx (app sidebar + navbar)
@@ -140,7 +142,7 @@ Breaking this loses user pages. Read it twice.
 
 - **A saved document is one TipTap JSON. Top-level `pageBreak` nodes separate
   the sheets.** (Backward-compatible with the legacy single-sheet format.)
-- Sheet visual kind (`PageKind = 'framed' | 'blank' | 'notebook'`):
+- Sheet visual kind (`PageKind = 'framed' | 'blank' | 'notebook' | 'cover' | 'toc' | 'booklet'`):
   - first sheet: `doc.attrs.pageKind`
   - later sheets: attrs of the `pageBreak` node **before** that sheet
     (`attrs.kind`), plus `attrs.auto === true` when the engine created it
@@ -166,6 +168,51 @@ Breaking this loses user pages. Read it twice.
   `mergePagesIntoDoc` persists the id back on the break as `attrs.pid`.
   Only runtime-created pages get random ids (persisted on next save).
   Server seeding (`collab/rooms.ts`) uses the SAME derivation.
+
+### §4b — Booklet page template (قالب جزوه, kind = 'booklet')
+
+A sixth PageKind implementing a quiet study-booklet frame (fine double
+line, top flourish, bottom page-number circle + waveform strokes, right
+edge ornament = 007.png rotated 90° — the white tab/box + hatch +
+LogoT.png were REMOVED by user request; the ornament is boxless art).
+Deliberately NOT a parallel system — every concern rides an
+existing source of truth:
+
+- **Rendering:** page chrome only. `buildBookletArt` → pure SVG in the
+  sheet's own viewBox (0 0 794 1123), rendered by `BookletChrome` as an
+  aria-hidden background layer (same `.page-border` layer as the framed
+  sheet), tiled per A4 sheet like PageBorder. Never enters ProseMirror:
+  no nodes/text/floating elements, no undo steps, no transactions.
+- **Right ornament (007.png):** the real asset
+  (`@/assets/brand/007.png?inline`, 740×624), embedded as a data URI
+  INSIDE the chrome SVG, fitted into a 46×46 slot and rotated +90° about
+  the slot center (face right). Not recolored, not an object, never
+  draggable. (The old LogoT tab/box/hatch no longer renders anywhere.)
+- **Color:** the SAME `BorderSettings` every template uses (قالب tab →
+  the existing picker, `patchBorder` → `saveSettings`). Only the two
+  DEFAULT stock values (#1E3A5F/#C5A24D) remap to the booklet's soft
+  blueprint blue so a user-chosen color always passes through untouched;
+  the second line derives via `blendToward`. No parallel state.
+- **Page number:** real page index via `faDigits(pageNumber)` — no
+  parallel numbering (editor `Page.tsx`, sidebar thumbnails and
+  `pageModelExport` all pass `i+1`).
+- **Geometry:** ONE contract — `pageCapacity.BOOKLET_GEOMETRY`
+  (frameInset 18 / frameGap 6 / safeAir 10 / rightOrnW 46 / rightOrnGapFrame
+  4). `.page-booklet` padding is DERIVED (18+6+10 = 34 base;
+  right = 34 + 46 + 4 = 84): the whole ornament slot lives INSIDE the
+  reserved right margin, its right edge 4px inside the inner frame line,
+  and the text edge stops exactly `safeAir` (10px) left of the slot — text,
+  floats and import clamping can never collide with the ornament whatever
+  the user types. Mirrors: index.css `.page-booklet` (34/84/34/34),
+  `pageModelExport.PAD_OF` (reads BOOKLET_PADDING → mmpx),
+  `pageContentBounds('booklet')` via `bookletContentRect()`. Frame lines
+  are the hand-drawn wobble (±0.9px) — decorative chrome, not layout.
+- **Export:** print/PDF via `bookletSvgString` in `buildPagesHtml`
+  (real index per sheet); Word keeps its continuous-document policy
+  (borders stripped — intentional). QA: `scripts/qa-booklet-template.mjs`,
+  `scripts/qa-booklet-color.mjs`, `scripts/qa-booklet-print.mjs`,
+  `scripts/qa-booklet-logo-isolation.mjs`, `scripts/qa-booklet-style-option.mjs`
+  (print probe opens the preview via the `pn:open-print-preview` event).
 - **Autosave identity (§11):** all save paths read the live note id from
   `noteIdRef` (a ref, not the route param), so the `/editor/new → real-id`
   redirect never leaves a scheduler writing to `/api/notes/new`.

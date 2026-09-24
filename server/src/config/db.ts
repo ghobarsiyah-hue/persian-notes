@@ -4,6 +4,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { env } from './env.js';
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -26,6 +27,16 @@ const DEV_DB_PORT = Number(process.env.MONGO_DEV_PORT) || 27017;
 const DEV_DB_HOST = '127.0.0.1';
 
 let mongodProc: ChildProcess | null = null;
+/** set when mongodb-memory-server manages the mongod (download-on-demand path) */
+type MemServerHandle = { stop: (opts?: { doCleanup?: boolean }) => Promise<unknown> };
+let memServer: MemServerHandle | null = null;
+
+/** server/.mongo-data regardless of the process cwd (tsx watch runs with cwd=server,
+ *  but someone may also run `node server/dist/index.js` from the repo root) */
+const DB_DATA_DIR = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)), // server/src/config | server/dist/config
+  '..', '..', '.mongo-data',
+);
 
 function probePort(port: number, host: string, timeoutMs = 1500): Promise<boolean> {
   return new Promise((resolve) => {
@@ -37,34 +48,86 @@ function probePort(port: number, host: string, timeoutMs = 1500): Promise<boolea
   });
 }
 
-/** locate a mongod executable: explicit env → memory-server's cache → fail */
+/** locate a mongod executable: explicit env → memory-server's cache (any layout) → fail
+ *
+ *  Cross-OS: on Windows the binary is `mongod*.exe`, elsewhere plain `mongod`.
+ *  The cache may hold the exe flat at the top (renamed by mongodb-memory-server)
+ *  or nested inside per-version directories — scan two levels deep, pick the
+ *  highest version so an updated cache always wins. */
 function findMongodBinary(): string | null {
   const candidates = [
     process.env.MONGO_DEV_BINARY,
     process.env.MONGOMS_SYSTEM_BINARY,
   ].filter((v): v is string => Boolean(v));
-  const cacheDir = path.join(process.env.USERPROFILE || process.env.HOME || '.', '.cache', 'mongodb-binaries');
-  if (existsSync(cacheDir)) {
-    /* readdirSync via the top-level node:fs import — this module is ESM
-       (package "type": "module"), where require() does not exist and
-       crashed the whole dev fallback with ReferenceError */
+  const isWin = process.platform === 'win32';
+  const suffix = isWin ? '.exe' : '';
+  const home = process.env.USERPROFILE || process.env.HOME;
+  const cacheDirs = [
+    home ? path.join(home, '.cache', 'mongodb-binaries') : null,
+    process.env.MONGOMS_DOWNLOAD_DIR ?? null,
+  ].filter((v): v is string => Boolean(v));
+  for (const cacheDir of cacheDirs) {
+    if (!existsSync(cacheDir)) continue;
     for (const f of readdirSync(cacheDir)) {
-      if (f.endsWith('.exe') && f.startsWith('mongod')) candidates.push(path.join(cacheDir, f));
+      const full = path.join(cacheDir, f);
+      if (f.startsWith('mongod') && f.endsWith(suffix)) {
+        candidates.push(full); // flat layout: mongod-x64-win32-7.0.24.exe
+      } else {
+        try {
+          for (const g of readdirSync(full)) {
+            if (g === 'mongod' + suffix) candidates.push(path.join(full, g));
+          }
+        } catch { /* not a directory (e.g. a stray .mdmp crash dump) */ }
+      }
     }
   }
+  /* sort so the lexicographically-highest version wins when several exist */
+  candidates.sort();
   for (const c of candidates) if (existsSync(c)) return c;
   return null;
 }
 
-/** spawn a persistent mongod for development with a project-local data dir */
-function startPersistentMongod(): boolean {
-  const bin = findMongodBinary();
-  if (!bin) return false;
-  /* data lives INSIDE the repo tree (server/.mongo-data) so it is obvious,
-     portable with the checkout and survives restarts */
-  const dbPath = path.resolve(process.cwd(), '.mongo-data');
+/** one-time on-demand download via mongodb-memory-server (already a dependency);
+ *  resolves with a running instance bound to (DEV_DB_HOST, DEV_DB_PORT) or null */
+async function downloadAndStartViaMemoryServer(): Promise<boolean> {
+  try {
+    const mms = await import('mongodb-memory-server');
+    console.log('⇩ باینری MongoDB برای توسعه پیدا نشد — یک‌بار دانلود می‌شود (۷۰ مگابایت، کمی طول می‌کشد)…');
+    const ms = await mms.MongoMemoryServer.create({
+      instance: { port: DEV_DB_PORT, dbPath: DB_DATA_DIR, storageEngine: 'wiredTiger' },
+    });
+    memServer = ms;
+    return true;
+  } catch (err) {
+    console.error('✗ دانلود خودکار باینری MongoDB ناموفق بود:', (err as Error).message);
+    return false;
+  }
+}
+
+/** actionable error when NO mongod can be obtained at all (no binary, no
+ *  download, no internet) — the previous silent failure looked like a hang */
+function reportNoBinary(): never {
+  console.error(
+    ['✗ راه‌اندازی MongoDB توسعه ناموفق بود — هیچ mongod قابل استفاده پیدا نشد.',
+     '  یکی از این راه‌ها را انتخاب کنید:',
+     '  ۱) MongoDB را نصب کنید و MONGODB_URI را در .env تنظیم کنید (راه اصلی).',
+     '  ۲) اینترنت داشته باشید تا باینری به‌صورت خودکار دانلود شود (یک‌بار).',
+     '  ۳) اگر باینری را دارید، مسیرش را در .env بدهید:',
+     '     MONGO_DEV_BINARY=C:\\path\\to\\mongod.exe        (ویندوز)',
+     '     MONGO_DEV_BINARY=/usr/local/bin/mongod          (مک/لینوکس)',
+    ].join('\n'),
+  );
+  throw new Error('dev MongoDB unavailable');
+}
+
+/** spawn a persistent mongod for development with a project-local data dir.
+ *  Detects an instant exit (port conflict on a stale mongod with the same
+ *  dbpath, corrupted WiredTiger lock, …) instead of burning the full wait. */
+async function startPersistentMongod(bin: string): Promise<boolean> {
+  const dbPath = DB_DATA_DIR;
   try { mkdirSync(dbPath, { recursive: true }); } catch { return false; }
   try {
+    let exited = false;
     mongodProc = spawn(bin, [
       '--dbpath', dbPath,
       '--port', String(DEV_DB_PORT),
@@ -72,16 +135,19 @@ function startPersistentMongod(): boolean {
       /* '--nojournal' removed: mongod 7.x REJECTS it ('unrecognised option')
          and exits instantly, which made the whole dev fallback fail */
     ], { stdio: 'ignore', windowsHide: true });
-    mongodProc.on('error', () => { mongodProc = null; });
-    mongodProc.on('exit', () => { mongodProc = null; });
+    mongodProc.on('error', () => { mongodProc = null; exited = true; });
+    mongodProc.on('exit', () => { mongodProc = null; exited = true; });
+    /* give it a beat; an instant crash means the wait loop below is pointless */
+    return await new Promise<boolean>((resolve) => {
+      setTimeout(() => resolve(!exited), 1200);
+    });
   } catch {
     return false;
   }
-  return mongodProc !== null;
 }
 
 /** wait until something answers on the dev port (an existing mongod OR ours) */
-async function waitUntilReachable(timeoutMs = 20000): Promise<boolean> {
+async function waitUntilReachable(timeoutMs = 15000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (await probePort(DEV_DB_PORT, DEV_DB_HOST, 600)) return true;
@@ -142,9 +208,16 @@ export async function connectDB(): Promise<void> {
         return;
       } catch { /* fall through and try spawning */ }
     }
-    console.warn('⚠ MongoDB در دسترس نیست — راه‌اندازی MongoDB محلیِ پایدار برای توسعه...');
-    if (!startPersistentMongod() || !(await waitUntilReachable())) {
-      console.error('✗ راه‌اندازی MongoDB توسعه ناموفق بود — هیچ mongod قابل استفاده پیدا نشد.');
+    console.warn(`⚠ MongoDB تنظیم‌شده (${env.mongoUri}) در دسترس نیست — راه‌اندازی MongoDB محلیِ پایدار برای توسعه…`);
+    const bin = findMongodBinary();
+    let started = bin ? await startPersistentMongod(bin) : false;
+    if (!started) {
+      started = await downloadAndStartViaMemoryServer();
+    }
+    if (!started || !(await waitUntilReachable())) {
+      if (!started) reportNoBinary();
+      /* started but never answered: stale lock / port conflict */
+      console.error('✗ mongod راه‌اندازی شد ولی روی پورت پاسخ نداد — احتمالاً یک mongod قدیمی با همان dbpath در حال اجراست یا فایل‌های قفل خراب‌اند. پوشه server/.mongo-data را پس از بستن پروسه‌ها پاک کنید.');
       throw new Error('dev MongoDB unavailable');
     }
     await mongoose.connect(`mongodb://${DEV_DB_HOST}:${DEV_DB_PORT}/persian-notes`);
@@ -160,6 +233,10 @@ export async function disconnectDB(): Promise<void> {
   if (mongodProc && !mongodProc.killed) {
     try { mongodProc.kill(); } catch { /* already gone */ }
     mongodProc = null;
+  }
+  if (memServer) {
+    try { await memServer.stop({ doCleanup: false }); } catch { /* already gone */ }
+    memServer = null;
   }
 }
 

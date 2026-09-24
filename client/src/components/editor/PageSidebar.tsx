@@ -3,7 +3,7 @@ import { ChevronsLeft, ChevronsRight, Copy, FilePlus, MoreVertical, Trash2, Edit
 import { faDigits } from '@/utils/fa';
 import { PageTypePicker } from './PageTypePicker';
 import type { PageKind } from '@/types';
-import { PageBorder } from '@/components/border/PageBorder';
+import { PageBorder, BookletChrome } from '@/components/border/PageBorder';
 import { PAGE_PREVIEW_BORDER } from '@/components/editor/Page';
 
 /* ── Thumbnail geometry ──────────────────────────────────────────────
@@ -26,6 +26,11 @@ export interface PageSidebarItem {
   pageNumber: number;
   kind: PageKind;
   html: string;
+  /** item 15: cover thumbnail fields (only when kind === 'cover') */
+  coverSrc?: string;
+  coverFit?: 'cover' | 'contain';
+  coverTitle?: string;
+  coverSubtitle?: string;
 }
 
 interface Props {
@@ -39,6 +44,8 @@ interface Props {
   onAddPage: (afterId?: string, kind?: PageKind) => void;
   onAddPageBefore?: (beforeId: string, kind?: PageKind) => void;
   onAddPageOfKind: (kind: PageKind) => void;
+  /** item 15: open the جلد/فهرست insert modal */
+  onOpenCoverInsert: () => void;
   onDuplicate: (id: string) => void;
   onDelete: (id: string) => void;
   onRename?: (id: string) => void;
@@ -102,6 +109,7 @@ export const PageSidebar = memo(function PageSidebar({
   onAddPage,
   onAddPageBefore,
   onAddPageOfKind,
+  onOpenCoverInsert,
   onDuplicate,
   onDelete,
   onRename,
@@ -213,9 +221,14 @@ export const PageSidebar = memo(function PageSidebar({
               aria-selected={aiOpen}
               onClick={() => onTabChange('ai')}
               title="دستیار هوش مصنوعی"
-              className={`flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] font-semibold transition-colors ${
-                aiOpen ? 'bg-black/[.06] text-[#171717] dark:bg-white/[.08] dark:text-white' : 'text-[#999] hover:text-[#666] dark:text-[#666] dark:hover:text-[#aaa]'
-              }`}
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] font-semibold transition-colors"
+              style={
+                aiOpen
+                  ? { background: '#155e6b', color: '#ffffff' }
+                  : { color: '#999999' }
+              }
+              onMouseEnter={(e) => { if (!aiOpen) e.currentTarget.style.color = '#155e6b'; }}
+              onMouseLeave={(e) => { if (!aiOpen) e.currentTarget.style.color = '#999999'; }}
             >
               <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
               دستیار
@@ -331,6 +344,9 @@ export const PageSidebar = memo(function PageSidebar({
                         {p.kind === 'framed' && (
                           <PageBorder settings={PAGE_PREVIEW_BORDER} pageNumber={p.pageNumber} totalPages={0} />
                         )}
+                        {p.kind === 'booklet' && (
+                          <BookletChrome settings={PAGE_PREVIEW_BORDER} pageNumber={p.pageNumber} />
+                        )}
                         {p.kind === 'notebook' && (
                           <div
                             className="page-notebook-lines"
@@ -340,6 +356,25 @@ export const PageSidebar = memo(function PageSidebar({
                               '--editor-line-height': String(editorLineHeight),
                             } as CSSProperties}
                           />
+                        )}
+                        {/* item 15: cover/toc thumbnails — static mini layers */}
+                        {p.kind === 'cover' && (
+                          <div className="page-cover-layer">
+                            {p.coverSrc
+                              ? <img src={p.coverSrc} alt="" className="absolute inset-0 h-full w-full" style={{ objectFit: p.coverFit === 'contain' ? 'contain' : 'cover' }} />
+                              : <div className="absolute inset-0 bg-gradient-to-b from-ink-50 to-white dark:from-ink-900 dark:to-ink-950" />}
+                            {(p.coverTitle || p.coverSubtitle) && (
+                              <div className="absolute inset-x-0 bottom-6 flex flex-col items-center gap-1 px-6 text-center">
+                                {p.coverTitle && <span className="max-w-full truncate rounded-md bg-black/60 px-3 py-1 text-[11px] font-extrabold text-white">{p.coverTitle}</span>}
+                                {p.coverSubtitle && <span className="max-w-full truncate rounded bg-black/45 px-2 py-0.5 text-[9px] text-white/90">{p.coverSubtitle}</span>}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {p.kind === 'toc' && (
+                          <div className="page-toc-layer"><div className="page-toc-heading">فهرست مطالب</div><div className="page-toc-lines">
+                            {Array.from({ length: 12 }, (_, i) => (<div className="page-toc-row" key={i}><span className="page-toc-title" /><span className="page-toc-dots" /><span className="page-toc-num" /></div>))}
+                          </div></div>
                         )}
                         <div className="page-content">
                           <div
@@ -423,6 +458,7 @@ export const PageSidebar = memo(function PageSidebar({
               onAddPageOfKind(kind);
               setAddMenu(null);
             }}
+            onPickSpecial={onOpenCoverInsert}
           />
         </PageTypePickerFloating>
       )}

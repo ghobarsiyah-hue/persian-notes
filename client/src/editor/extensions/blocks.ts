@@ -3,6 +3,11 @@ import * as prosemirrorState from 'prosemirror-state';
 import katex from 'katex';
 import { premiumSvg } from '@/components/editor/iconAssets';
 
+/* Reentrancy guard shared with Page.tsx's beforeinput trap: the execCommand
+   calls in the span keydown handlers below fire synthetic beforeinput events
+   again; the flag makes those pass through the trap untouched (no loop). */
+let pnNestedEditApplying = false;
+
 /* ------------------------------------------------------------------ */
 /* Educational blocks for Persian study notes                          */
 /*                                                                     */
@@ -235,10 +240,40 @@ function editableTitleView(spec: EditableTitleSpec) {
       const cur = editor.state.doc.nodeAt(pos);
       const val = text.textContent ?? '';
       if (!cur || cur.attrs[spec.attr] === val) return;
+      /* CARET PRESERVATION: dispatching inside this observer lets PM/native
+         selection normalization YANK the DOM caret out of the span and drop
+         it at PM's internal selection (the body paragraph) — mid-word the
+         user's next chars then land BELOW the question («حرف می‌پره بیرون»).
+         Capture the caret state before the dispatch and restore it after. */
+      const sel = window.getSelection();
+      const anchor = sel?.anchorNode ?? null;
+      const hadCaret = anchor != null && text.contains(anchor);
+      const offsetInSpan = hadCaret && anchor === text
+        ? sel!.anchorOffset
+        : -1;
+      const textNodeOffset = hadCaret && anchor instanceof Text
+        ? sel!.anchorOffset
+        : -1;
       syncing = true;
       try {
         editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, [spec.attr]: val }));
-      } finally { syncing = false; }
+      } finally {
+        syncing = false;
+      }
+      if (hadCaret) {
+        const sel2 = window.getSelection();
+        const stillIn = sel2?.anchorNode != null && text.contains(sel2.anchorNode);
+        if (!stillIn && text.firstChild instanceof Text) {
+          try {
+            const range = document.createRange();
+            const off = textNodeOffset >= 0 ? Math.min(textNodeOffset, text.firstChild.length) : text.firstChild.length;
+            range.setStart(text.firstChild, off);
+            range.collapse(true);
+            sel2!.removeAllRanges();
+            sel2!.addRange(range);
+          } catch { /* best effort — typing continues from PM's caret */ }
+        }
+      }
     };
     const titleObserver = new MutationObserver(() => sync());
     titleObserver.observe(text, { characterData: true, childList: true, subtree: true });
@@ -286,8 +321,19 @@ function editableTitleView(spec: EditableTitleSpec) {
       contentDOM,
       update(updated: any) {
         if (updated.type.name !== spec.name) return false;
+        /* VALUE-EQUAL GUARD: only reassign when the DOM actually differs.
+           The caret anchor (activeElement) is the PM ROOT while typing in a
+           nested span — the old activeElement check was always true, so any
+             unrelated transaction (engine pass, remote op, option toggle)
+           re-assigned textContent even when EQUAL, killing the caret, and
+           when a sync raced a keystroke, ERASING the just-typed text. */
+        const liveSel = window.getSelection();
+        const selInText = liveSel?.anchorNode != null && text.contains(liveSel.anchorNode);
+        const nextTitle = updated.attrs[spec.attr] || '';
+        if ((text.textContent ?? '') !== nextTitle && !selInText) {
+          text.textContent = nextTitle;
+        }
         if (document.activeElement !== text) {
-          text.textContent = updated.attrs[spec.attr] || '';
           const s = title.querySelector<HTMLElement>('.edu-title-suffix');
           if (s && spec.suffix) s.textContent = spec.suffix(updated);
         }
@@ -578,7 +624,13 @@ export const TrueFalseBlock = Node.create({
       iconKey: 'truefalse',
       fallback: 'جمله درست / نادرست را بنویسید…',
       suffix: pointsSuffix,
-      extraAttrs: (node) => ({ 'data-answer': String(node.attrs.answer ?? 'none') }),
+      /* data-qv/chip/gap MUST ride the wrapper (with data-answer) — the
+         variant picker paints TF through the same data-qv CSS the other
+         question families use; missing them kept TF stuck on the base look */
+      extraAttrs: (node) => ({
+        'data-answer': String(node.attrs.answer ?? 'none'),
+        ...quizWrapperExtras(node),
+      }),
       buildBody: (node, wrapper, editor, getPos, els) => {
         const row = document.createElement('div');
         row.className = 'quiz-tf-row';
@@ -767,19 +819,61 @@ function renderMcqOptions(
     try { txt.contentEditable = 'plaintext-only'; } catch { txt.contentEditable = 'true'; }
     txt.textContent = opt;
     spanRefs.push(txt);
-    txt.addEventListener('input', () => {
+    /* option text sync — MutationObserver (NOT an input listener): the
+       nested-contenteditable beforeinput trap in Page.tsx applies the char
+       itself and the retargeted input event never reaches this span; the
+       observer sees every DOM edit path regardless. Same caret-preservation
+       pattern as the title sync above. */
+    const syncOpt = () => {
       const pos = getPos();
       if (pos == null) return;
       const cur = editor.state.doc.nodeAt(pos);
       if (!cur) return;
+      const val = txt.textContent ?? '';
       const arr = [...(cur.attrs.options as string[] ?? ['', '', '', ''])];
       while (arr.length < 4) arr.push('');
-      arr[i] = txt.textContent ?? '';
+      if (arr[i] === val) return;
+      const sel = window.getSelection();
+      const anchor = sel?.anchorNode ?? null;
+      const hadCaret = anchor != null && txt.contains(anchor);
+      const textNodeOffset = hadCaret && anchor instanceof Text ? sel!.anchorOffset : -1;
       editor.view.dispatch(
-        editor.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, options: arr }),
+        editor.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, options: arr.map((v, j) => (j === i ? val : v)) }),
       );
+      if (hadCaret) {
+        const sel2 = window.getSelection();
+        const stillIn = sel2?.anchorNode != null && txt.contains(sel2.anchorNode);
+        if (!stillIn && txt.firstChild instanceof Text) {
+          try {
+            const range = document.createRange();
+            range.setStart(txt.firstChild, textNodeOffset >= 0 ? Math.min(textNodeOffset, txt.firstChild.length) : txt.firstChild.length);
+            range.collapse(true);
+            sel2!.removeAllRanges();
+            sel2!.addRange(range);
+          } catch { /* best effort */ }
+        }
+      }
+    };
+    new MutationObserver(() => syncOpt()).observe(txt, { characterData: true, childList: true, subtree: true });
+    txt.addEventListener('blur', syncOpt);
+    /* keydown contract for the option span — Enter never inserts a line;
+       Backspace/Delete are applied HERE and stopped before the PM root:
+       PM's keydown (retargeted) preventDefaults from its own doc selection
+       and deletes nothing (same root cause as the editable titles) */
+    txt.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Enter') { e.preventDefault(); return; }
+      if (e.key !== 'Backspace' && e.key !== 'Delete') return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      pnNestedEditApplying = true;
+      try {
+        if (window.getSelection()?.isCollapsed) {
+          document.execCommand(e.key === 'Backspace' ? 'delete' : 'forwardDelete', false);
+        } else {
+          document.execCommand('delete', false);
+        }
+      } finally { pnNestedEditApplying = false; }
     });
-    txt.addEventListener('keydown', (e) => { if (e.key === 'Enter') e.preventDefault(); });
 
     /* delete — remove the option (its slot stays, 4 rows are structural) */
     const del = document.createElement('button');

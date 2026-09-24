@@ -10,14 +10,29 @@ export interface Group {
   name: string;
   avatar: string | null;
   description: string;
+  /** hex accent color or null = system accent — the group's theming hook */
+  accentColor: string | null;
   ownerId: string;
   memberCount: number;
+  /** security model (mirrors the server) */
+  joinPolicy: 'invite' | 'open';
+  contentPolicy: 'members' | 'public';
   /** the CALLER's role in this group (null when not a member) */
   myRole: GroupRole | null;
   myStatus: GroupMembershipStatus | null;
   createdAt: string;
   updatedAt: string;
 }
+
+export const JOIN_POLICY_LABELS: Record<Group['joinPolicy'], string> = {
+  invite: 'فقط با دعوت مدیر',
+  open: 'پیوستن آزاد',
+};
+
+export const CONTENT_POLICY_LABELS: Record<Group['contentPolicy'], string> = {
+  members: 'فقط اعضا',
+  public: 'عمومی (خواندن با لینک)',
+};
 
 export interface GroupMember {
   membershipId: string;
