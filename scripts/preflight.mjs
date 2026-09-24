@@ -70,7 +70,7 @@ if (!depsInstalled()) {
 }
 
 /* ── 4. stale processes on dev ports ──────────────────────────────────── */
-const PORTS = [4000, 5173, 27017];
+const PORTS = [4000, 5173, 5174, 5199, 27017];
 const KEY = 'persian-notes'; // only ever kill processes whose cmdline mentions our project
 
 function pidsOnPort(port) {
