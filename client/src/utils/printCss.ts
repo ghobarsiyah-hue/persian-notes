@@ -34,9 +34,12 @@ export const TINTED_CSS = `
   .pn-sheet-content .edu-comparison { background: rgba(121,40,202,0.04); }
   .pn-sheet-content .edu-timeline { background: rgba(0,112,243,0.04); }
   .pn-sheet-content .edu-footnote { background: rgba(31,115,150,0.04); }
-  .pn-sheet-content .edu-longanswer { background: rgba(245,166,35,0.05); }
-  .pn-sheet-content .edu-truefalse { background: rgba(31,115,150,0.05); }
-  .pn-sheet-content .edu-mcq { background: rgba(121,40,202,0.04); }
+  /* v7 (کنتراست) dark plate must not be overpainted by the tint wash —
+     mirror of the index.css cascade fix (same rule strength, but TINTED_CSS
+     is emitted AFTER the v7 block in the print doc) */
+  .pn-sheet-content .edu-longanswer:not([data-qv="v7"]):not([data-qv="v6"]) { background: rgba(245,166,35,0.05); }
+  .pn-sheet-content .edu-truefalse:not([data-qv="v7"]):not([data-qv="v6"]) { background: rgba(31,115,150,0.05); }
+  .pn-sheet-content .edu-mcq:not([data-qv="v7"]):not([data-qv="v6"]) { background: rgba(121,40,202,0.04); }
 `;
 
 /**
@@ -178,7 +181,9 @@ export function printCss(options: ExportOptionsCss): string {
      cell edges in the print fragment renderer — the visible symptom was
      tables whose inner gridlines vanished while the outer edge survived.
      border-radius is sacrificed on paper (no clipping needed anyway). */
-  .pn-sheet-content table { border-collapse: collapse; table-layout: fixed; width: 100%; margin: 0.6em 0; /* گوشه‌های گرد — هم‌ادیتور: با border-radius خودِ table */ border-radius: 8px; }
+  /* separate + zero spacing — the editor's rounded-outer-cells look
+     reproduces 1:1 on paper; per-side borders replace the collapsed grid */
+  .pn-sheet-content table { border-collapse: separate; border-spacing: 0; table-layout: fixed; width: 100%; margin: 0.6em 0; border-radius: 8px; }
   /* kept from index.css 1:1: min-width floor — the EDITOR allows dragging
      a table narrow (min-width:120px); print honors whatever width was set
      via the width attribute below, but a shrunken table still floors at
@@ -198,17 +203,25 @@ export function printCss(options: ExportOptionsCss): string {
   /* جدول: گرید پیش‌فرض بنفش سیستم؛ رنگ سفارشی از --pn-grid (که renderHTML و
      NodeView به‌صورت inline روی خود table می‌گذارند) می‌آید — همان رنگ در
      ادیتور و PDF. transparent = data-grid="none" (بدون خط) */
-  .pn-sheet-content table td, .pn-sheet-content table th { border: 1px solid #b9a7e0; padding: 8px 12px; vertical-align: top; /* BUG-1: opaque surface — notebook ruling must not show through cells */ background: #ffffff; }
+  .pn-sheet-content table td, .pn-sheet-content table th { border-top: none; border-inline-start: none; border-inline-end: 1px solid #c8bce8; border-bottom: 1px solid #c8bce8; padding: 8px 12px; vertical-align: top; /* BUG-1: opaque surface — notebook ruling must not show through cells */ background: #ffffff; }
   /* گرید — table[data-tstyle][data-grid] variants MUST stay AFTER the
      tstyle rules below them in cascade weight (same trick as index.css:
      the preset templates used to swallow the grid color). These sit right
      before the templates AND carry the higher specificity, so they win
      regardless of file order. */
-  .pn-sheet-content table[data-grid] td, .pn-sheet-content table[data-grid] th { border-color: var(--pn-grid, #b9a7e0); }
-  .pn-sheet-content table[data-tstyle][data-grid] td, .pn-sheet-content table[data-tstyle][data-grid] th { border-color: var(--pn-grid, #b9a7e0); }
+  .pn-sheet-content table[data-grid] td, .pn-sheet-content table[data-grid] th { border-color: var(--pn-grid, #c8bce8); }
+  .pn-sheet-content table[data-tstyle][data-grid] td, .pn-sheet-content table[data-tstyle][data-grid] th { border-color: var(--pn-grid, #c8bce8); }
   .pn-sheet-content table[data-tstyle][data-grid='none'] td, .pn-sheet-content table[data-tstyle][data-grid='none'] th { border-color: transparent; }
   .pn-sheet-content table[data-grid='none'] td, .pn-sheet-content table[data-grid='none'] th { border-color: transparent; }
-  .pn-sheet-content table th { background: #fafafa; color: #171717; font-weight: 600; font-size: 0.9em; }
+  .pn-sheet-content table th { background: #f2ecfb; color: #171717; font-weight: 600; font-size: 0.9em; }
+  /* outer edges + rounded outer cells — index.css 1:1 (full-grid presets
+     opt back in; self-drawn templates revert to collapse) */
+  .pn-sheet-content table:not([data-tstyle]) td:first-child, .pn-sheet-content table:not([data-tstyle]) th:first-child, .pn-sheet-content table[data-tstyle='navy'] td:first-child, .pn-sheet-content table[data-tstyle='navy'] th:first-child, .pn-sheet-content table[data-tstyle='soft'] td:first-child, .pn-sheet-content table[data-tstyle='soft'] th:first-child { border-inline-start: 1px solid var(--pn-grid, #c8bce8); }
+  .pn-sheet-content table:not([data-tstyle]) tr:first-child td, .pn-sheet-content table:not([data-tstyle]) tr:first-child th, .pn-sheet-content table[data-tstyle='navy'] tr:first-child td, .pn-sheet-content table[data-tstyle='navy'] tr:first-child th, .pn-sheet-content table[data-tstyle='soft'] tr:first-child td, .pn-sheet-content table[data-tstyle='soft'] tr:first-child th { border-top: 1px solid var(--pn-grid, #c8bce8); }
+  .pn-sheet-content table tr:first-child td:first-child, .pn-sheet-content table tr:first-child th:first-child { border-start-start-radius: 8px; }
+  .pn-sheet-content table tr:first-child td:last-child, .pn-sheet-content table tr:first-child th:last-child { border-start-end-radius: 8px; }
+  .pn-sheet-content table tr:last-child td:first-child, .pn-sheet-content table tr:last-child th:first-child { border-end-start-radius: 8px; }
+  .pn-sheet-content table tr:last-child td:last-child, .pn-sheet-content table tr:last-child th:last-child { border-end-end-radius: 8px; }
   /* ── table design (طراحی جدول) — index.css 1:1 ──
      print-color-adjust: exact — WITHOUT it Chrome's default print
      rendering strips cell/header BACKGROUND paints (navy headers,
@@ -235,6 +248,7 @@ export function printCss(options: ExportOptionsCss): string {
   .pn-sheet-content table[data-align='right'] { margin-inline: 0.6em auto; }
   /* ── table style templates (قالب‌های آماده) — index.css tokens 1:1 ── */
   .pn-sheet-content table[data-tstyle='navy'] th { background: #1e3a5f; color: #ffffff; }
+  .pn-sheet-content table[data-tstyle='minimal'], .pn-sheet-content table[data-tstyle='academic'], .pn-sheet-content table[data-tstyle='bold'], .pn-sheet-content table[data-tstyle='plain'] { border-collapse: collapse; }
   .pn-sheet-content table[data-tstyle='soft'] td, .pn-sheet-content table[data-tstyle='soft'] th { border-color: #d8dee6; }
   .pn-sheet-content table[data-tstyle='soft'] th { background: #f0f4f8; }
   .pn-sheet-content table[data-tstyle='minimal'] td, .pn-sheet-content table[data-tstyle='minimal'] th { border: none; border-bottom: 1px solid #e2e5ea; }
@@ -275,6 +289,14 @@ export function printCss(options: ExportOptionsCss): string {
   .pn-sheet-content .edu-answer { border-top: 1px solid rgba(0,0,0,0.06); margin-top: 0.4em; padding-top: 0.4em; color: #666; }
   .pn-sheet-content .edu-title-icon { display: inline-flex; align-items: center; opacity: 0.85; }
   .pn-sheet-content .edu-title-icon svg { width: 1em; height: 1em; display: block; }
+  /* PLACEHOLDERS MUST NEVER PRINT (user report: a question whose title was
+     deliberately emptied printed the default «سوال تشریحی»). index.css shows
+     editing placeholders via :empty::before — the same-document print/PDF
+     pipeline would inherit them. Kill every editing placeholder on paper. */
+  .pn-sheet-content .edu-title-text:empty::before,
+  .pn-sheet-content .edu-procon-text:empty::before,
+  .pn-sheet-content .edu-code-area:empty::before,
+  .pn-sheet-content .quiz-opt-text:empty::before { content: none !important; }
   .pn-sheet-content .edu-title-suffix { opacity: 0.6; font-weight: 500; font-size: 0.85em; white-space: nowrap; }
   .pn-sheet-content .edu-procon-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 6px; }
   .pn-sheet-content .edu-procon-col { border-radius: 8px; padding: 8px 12px; }

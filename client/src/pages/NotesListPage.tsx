@@ -4,6 +4,7 @@ import { notesApi, subjectsApi } from '@/api/endpoints';
 import { useApp } from '@/store/AppProvider';
 import { NoteCard } from '@/components/notes/NoteCard';
 import { NewSubjectModal } from '@/components/notes/NewSubjectModal';
+import { NoteManagePanel } from '@/components/notes/NoteManagePanel';
 import { EmptyState, Button, Select, Skeleton } from '@/components/ui';
 import type { Note } from '@/types';
 
@@ -16,6 +17,7 @@ export function NotesListPage({ mode }: { mode: 'all' | 'favorite' | 'trash' }) 
   const [subjectFilter, setSubjectFilter] = useState(searchParams.get('subject') ?? '');
   const [query, setQuery] = useState('');
   const [newSubject, setNewSubject] = useState(false);
+  const [manageNote, setManageNote] = useState<Note | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -83,6 +85,7 @@ export function NotesListPage({ mode }: { mode: 'all' | 'favorite' | 'trash' }) 
             <NoteCard
               key={n._id}
               note={n}
+              onManage={(x) => setManageNote(x)}
               onTrash={mode === 'trash' ? undefined : async (x) => { await notesApi.update(x._id, { trashed: true }); void load(); }}
               onRestore={mode === 'trash' ? async (x) => { await notesApi.update(x._id, { trashed: false }); void load(); } : undefined}
               onDelete={
@@ -101,6 +104,13 @@ export function NotesListPage({ mode }: { mode: 'all' | 'favorite' | 'trash' }) 
       )}
 
       <NewSubjectModal open={newSubject} onClose={() => setNewSubject(false)} />
+      <NoteManagePanel
+        note={manageNote}
+        open={Boolean(manageNote)}
+        onClose={() => setManageNote(null)}
+        onChanged={load}
+        mode={mode}
+      />
     </div>
   );
 }

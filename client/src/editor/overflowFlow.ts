@@ -236,6 +236,20 @@ function isContainerKind(node: any): boolean {
   return p.break === 'container' && !p.selfBreak;
 }
 
+/** attrs marker on a container the split engine CREATED as the continuation
+ *  half of a page-straddling box. The box keeps its full identity (type,
+ *  title, styling) — only backflow re-joining treats this box specially:
+ *  its remaining children flow back into the PREVIOUS page's frame, and
+ *  once it empties fully the auto-page cleanup removes it. The marker is
+ *  inert everywhere else (validator: unknown attrs are allowed; NodeView:
+ *  renderHTML ignores it; user-facing boxes are never created with it). */
+const FLOW_CONTINUATION_ATTR = { pnFlowCont: true };
+
+/** is `node` a continuation half created by the container split engine? */
+function isFlowContinuation(node: any): boolean {
+  return isContainerKind(node) && (node.attrs as any)?.pnFlowCont === true;
+}
+
 /** Headings / code blocks must not be orphaned at a page bottom. */
 function isKeepWithNext(node: any): boolean {
   return !!(policyFor(node) as { keepWithNext?: boolean }).keepWithNext;
@@ -657,6 +671,55 @@ function tryContainerSplit(
        container (e.g. a huge exampleBlock with a wall of text) can never
        flow and the page stays overfull forever. */
     const cross = blockNode.child(0);
+
+    /* LIST inside the box: the first inner child is a list — delegate to
+       the item-split engine. Without this branch a box whose wall of text
+       is bulleted (فهرست داخل کادر) gave up here (line-split refuses
+       lists) → whole-box move → a lone overfull box could never flow and
+       every edit on the full page started jumping. The continuation opens
+       a NEW frame of the same box carrying the REST of the items. */
+    if (blockNode.childCount > 0 && isListKind(cross) && cross.childCount >= 2) {
+      const cStart0 = childStarts[0];
+      const listPos = cStart0 + 1;
+      let lastFit = -1;
+      let pos = listPos;
+      for (let i = 0; i < cross.childCount; i++) {
+        const el = nodeEl(view, pos);
+        pos += cross.child(i).nodeSize;
+        if (!el) break; // not rendered — stop measuring
+        if (g.toLocalY(el.getBoundingClientRect().bottom) > innerLimit + TOL) break;
+        lastFit = i;
+      }
+      if (lastFit >= 0 && lastFit < cross.childCount - 1) {
+        /* kept side: frame + title + the fitting item prefix; moved side:
+           a NEW frame with the remaining items (+ following siblings) */
+        const keptItems: Record<string, unknown>[] = [];
+        for (let i = 0; i <= lastFit; i++) keptItems.push(cross.child(i).toJSON());
+        const restItems: Record<string, unknown>[] = [];
+        for (let i = lastFit + 1; i < cross.childCount; i++) restItems.push(cross.child(i).toJSON());
+        const restListAttrs: Record<string, unknown> = { ...cross.attrs };
+        if (cross.type.name === 'orderedList') {
+          restListAttrs.start = (Number(restListAttrs.start) || 1) + (lastFit + 1);
+        }
+        const afterJSON0 = blockNode.content.content.slice(1).map((ch: any) => ch.toJSON());
+        const restContent0 = [
+          { type: cross.type.name, attrs: restListAttrs, content: restItems },
+          ...afterJSON0,
+        ];
+        const rest0: Record<string, unknown>[] = [
+          { type: blockNode.type.name, attrs: { ...blockNode.attrs, ...FLOW_CONTINUATION_ATTR }, content: restContent0 },
+        ];
+        doc.forEach((n: any, _offset: number, index: number) => {
+          if (index > blockIndex) rest0.push(n.toJSON());
+        });
+        let keptListSize = 1; // list content opening
+        for (let i = 0; i <= lastFit; i++) keptListSize += cross.child(i).nodeSize;
+        const splitAt = cStart0 + keptListSize; // just after the last fitting item
+        return { from: splitAt, to: doc.content.size, nodes: rest0 };
+      }
+      /* nothing fits or everything fits → fall through to the generic paths */
+    }
+
     if (blockNode.childCount > 0 && isFlowTextblock(cross)) {
       const crossStart0 = childStarts[0];
       const sp = inlineSplitAt(view, cross, crossStart0, { ...g, limit: innerLimit });
@@ -701,8 +764,11 @@ function tryContainerSplit(
     ? [{ type: cross.type.name, attrs: cross.attrs, content: crossRest }, ...afterJSON]
     : blockNode.content.content.slice(c).map((ch: any) => ch.toJSON());
 
+  /* mark the continuation half — tryBackflowContinuation keys on this to
+     re-join its children into the PREVIOUS page's frame (same contract as
+     the table's repeated header: a split artifact, invisible to users) */
   const rest: Record<string, unknown>[] = [
-    { type: blockNode.type.name, attrs: blockNode.attrs, content: restContent },
+    { type: blockNode.type.name, attrs: { ...blockNode.attrs, ...FLOW_CONTINUATION_ATTR }, content: restContent },
   ];
   doc.forEach((n: any, _offset: number, index: number) => {
     if (index > blockIndex) rest.push(n.toJSON());
@@ -1046,8 +1112,11 @@ function tryBackflowContinuation(
   /* — container: inner children re-join the previous page's frame.
      Only a FULLY-emptied continuation re-joins (bare children inserted
      inside the previous frame); a partial backflow keeps its own frame and
-     is appended AFTER the previous box (frame redraws on both pages). */
-  if (isContainerKind(first) && first.type.name === prevLast.type && sameJSON(first.attrs, prevLast.node.attrs)) {
+     is appended AFTER the previous box (frame redraws on both pages).
+     A continuation HALF (marked by the split engine) re-joins even when its
+     own attrs carry the pnFlowCont marker — identity is type + REAL attrs. */
+  if (isContainerKind(first) && first.type.name === prevLast.type
+    && sameJSON({ ...first.attrs, pnFlowCont: undefined }, prevLast.node.attrs)) {
     const { lastFit, endPos } = walkFitting();
     if (lastFit < 0) return null;
     const kids: Record<string, unknown>[] = [];

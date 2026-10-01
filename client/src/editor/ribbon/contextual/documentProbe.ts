@@ -98,6 +98,7 @@ const OBJECT_NODE_TYPES = new Set([
   'calloutBlock', 'questionBlock', 'exampleBlock', 'keyTermBlock', 'formulaBlock',
   'comparisonTable', 'timeline', 'footnoteBlock', 'longAnswerBlock', 'highlightBox',
   'referenceBlock', 'proConBlock', 'codeOutputBlock', 'trueFalseBlock', 'mcqBlock',
+  'matrixCompareBlock', 'orderStepsBlock',
   'blockquote', 'codeBlock', 'equation', 'equationInline',
 ]);
 

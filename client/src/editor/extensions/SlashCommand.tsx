@@ -8,7 +8,7 @@ import {
   Type, Heading1, Heading2, List, ListOrdered, CheckSquare, Quote,
   BookOpen, Star, AlertCircle, HelpCircle, CircleDot,
   Lightbulb, Minus, Code, Image, Table, Hash, FileText,
-  Columns, Sigma, PenTool, CheckCircle, ListChecks,
+  Columns, Sigma, PenTool, CheckCircle, ListChecks, Grid2x2,
 } from 'lucide-react';
 
 /** builds a callout-style educational block */
@@ -73,6 +73,12 @@ export const SLASH_ITEMS: SlashItem[] = [
     } },
   { group: 'رسانه و فرمول', title: 'مقایسه (جدول دو ستونه)', icon: icon(<Columns className="h-5 w-5" />), keywords: ['compare', 'moghayese', 'tadadol'], command: (e, r) => {
       e.chain().focus().deleteRange(r).insertContent({ type: 'comparisonTable', attrs: { leftLabel: 'بخش اول', rightLabel: 'بخش دوم' }, content: [{ type: 'paragraph' }] }).run();
+    } },
+  { group: 'رسانه و فرمول', title: 'مقایسهٔ چندگانه (ماتریس)', icon: icon(<Grid2x2 className="h-5 w-5" />), keywords: ['matrix', 'compare', 'moghayese', 'matris'], command: (e, r) => {
+      e.chain().focus().deleteRange(r).insertContent({ type: 'matrixCompareBlock', attrs: { topic: '', colLabels: ['', ''], rowLabels: ['', ''], cells: ['', '', '', ''] }, content: [{ type: 'paragraph' }] }).run();
+    } },
+  { group: 'رسانه و فرمول', title: 'مراحل به‌ترتیب', icon: icon(<ListOrdered className="h-5 w-5" />), keywords: ['steps', 'order', 'marahel', 'sequence'], command: (e, r) => {
+      e.chain().focus().deleteRange(r).insertContent({ type: 'orderStepsBlock', attrs: { topic: '', steps: ['', '', ''] }, content: [{ type: 'paragraph' }] }).run();
     } },
   { group: 'رسانه و فرمول', title: 'تصویر', icon: icon(<Image className="h-5 w-5" />), keywords: ['image', 'aks', 'picture'], command: (e, r) => {
       const url = window.prompt('آدرس (URL) تصویر را وارد کنید:');

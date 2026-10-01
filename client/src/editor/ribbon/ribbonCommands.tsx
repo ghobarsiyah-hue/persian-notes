@@ -12,7 +12,7 @@ import {
   Heading3, FilePlus, SeparatorHorizontal, BookOpen, Star, AlertCircle,
   HelpCircle, Lightbulb, Hash, Columns, FileText, PenTool, CircleDot, Sigma,
   CheckCircle, ListChecks,
-  Settings, Focus, Printer, FileDown, FileCode, Save, Keyboard, History,
+  Settings, Focus, Printer, FileDown, FileCode, Save, Keyboard, History, FileArchive, FileUp,
   ZoomIn, ZoomOut, PanelsTopLeft, Paintbrush, Plus,
   Square as SquareIcon,
   Circle as CircleIcon, Diamond as DiamondIcon,
@@ -38,6 +38,7 @@ import { InsertBlockModal } from '@/components/editor/InsertBlockModal';
 import { PageDesignModal } from '@/components/editor/PageDesignModal';
 import { svgToDataUri } from '@/components/editor/iconAssets';
 import { planTable, measureImportSpace } from '@/editor/importCapacity';
+import { applyBulletList, applyOrderedList, applyTaskList, alignHardBreakLines } from '@/editor/listCommands';
 
 /* ────────────────────────────────────────────────────────────────────────
    Ribbon command layer.
@@ -77,6 +78,12 @@ export interface RibbonProps {
   onShowShortcuts: () => void;
   onExportWord: () => void;
   onExportHtml: () => void;
+  /** خروجی Persian Notes (.pnote) — the native lossless package (§18) */
+  onExportPnote: () => void;
+  /** کپی صفحهٔ فعال با استایل و آیتم‌ها (print-pipeline replica → clipboard) */
+  onCopyActivePage: () => void;
+  /** وارد کردن فایل (.pnote / .pdf) — §10 */
+  onImportFile: () => void;
   /* document-level settings (real, persisted via saveSettings) */
   wordCount: number;
   border: BorderSettings;
@@ -182,28 +189,58 @@ function insertBlock(editor: Editor, payload: Record<string, unknown>) {
   editor.chain().focus().insertContent(payload as never).run();
 }
 
-/** Apply text-align per the original spec (item 3):
- *  text highlighted → only the paragraphs the selection touches;
- *  nothing highlighted (collapsed caret) → the WHOLE box (all blocks
- *  of the active page), then restore the caret where it was.
- *  Inside tables / on node selections, stay native (current cell only)
- *  — selectAll there would leak alignment outside the table.
+/** Apply text-align — shared by the ribbon هم‌ترازی menu AND the right-click
+ *  تنظیمات پاراگراف (one seam, two doors). `editor.state.selection` is the
+ *  single source of truth; it is NEVER widened:
+ *  • collapsed caret   → ONLY the paragraph/heading containing the caret
+ *    (nodeStart < to && nodeEnd > from selects exactly that one block).
+ *    One line per click — the user aligns line 5 center, line 2 left and
+ *    both must stick independently. The historical selectAll() path (and a
+ *    later "whole active box" variant) swept EVERY line of the page so the
+ *    last click won and single-line alignment was impossible — both
+ *    removed for good.
+ *  • text highlighted  → every paragraph/heading INTERSECTING [from, to]
+ *    and only those (a selection ending at a block boundary does not leak
+ *    into the next block — pos < to, not <=).
+ *  • table caret       → the walk descends into the cell, so the cell's
+ *    own paragraph is the single aligned block (no leak outside the table).
+ *  Document direction (dir="rtl") is never touched — only textAlign.
  */
-function setTextAlignSmart(editor: Editor, align: string) {
-  const { from, to } = editor.state.selection;
-  const caretInTable = editor.isActive('table');
-  if (from === to && !caretInTable) {
-    editor.chain().focus().selectAll().setTextAlign(align).setTextSelection(from).run();
-    return;
+export function setTextAlignSmart(editor: Editor, align: string) {
+  /* hardBreak lines first: a Shift+Enter line aligned INSIDE a multi-line
+     block must split that block (per-line text-align is otherwise
+     impossible) — alignHardBreakLines returns false when the selection
+     covers every line (→ whole-block markup, <br> structure kept) */
+  if (alignHardBreakLines(editor, align)) return;
+  const { state, view } = editor;
+  const { from, to } = state.selection;
+  const tr = state.tr;
+  const blockTypes = ['paragraph', 'heading'];
+  let changed = false;
+  state.doc.nodesBetween(from, to, (node, pos) => {
+    if (!blockTypes.includes(node.type.name)) return true; // descend into containers (lists, table cells)
+    const nodeEnd = pos + node.nodeSize;
+    if (pos < to && nodeEnd > from) {
+      tr.setNodeMarkup(pos, undefined, { ...node.attrs, textAlign: align });
+      changed = true;
+    }
+    return false; // text blocks have no nested blocks — never descend
+  });
+  if (changed) {
+    tr.setMeta('addToHistory', true);
+    view.dispatch(tr); // dispatch does NOT touch the selection — the caret stays put
+  } else {
+    /* node/odd selections (image, …) — native command so the button never
+       silently no-ops; it can only touch the selected node's own block */
+    editor.chain().focus().setTextAlign(align).run();
   }
-  editor.chain().focus().setTextAlign(align).run();
 }
 
 export function Ribbon({
   editor, onOpenAIPanel, aiPanelOpen, onOpenPrintPreview, onToggleFind,
   onNewPage, onAddPage, onChangePageKind, onAppendPageAtEnd, onAddFloatingElement,
   onNavigateSettings, onToggleSidebar,
-  onToggleFocus, onSave, onShowHistory, onShowShortcuts, onExportWord, onExportHtml,
+  onToggleFocus, onSave, onShowHistory, onShowShortcuts, onExportWord, onExportHtml, onExportPnote, onImportFile, onCopyActivePage,
   wordCount, border, onBorderChange, zoom, onZoomChange,
   eduBlocks, onOpenEduBlocks, onOpenCoverInsert, onOpenPageRange, activePageKind, saveState, collabPresence,
 }: RibbonProps) {
@@ -454,9 +491,9 @@ export function Ribbon({
           width={210}
         >
           <RibbonMenuSection label="فهرست‌ها" />
-          <RibbonMenuItem icon={icon4(List)} label="فهرست نقطه‌ای" active={editor.isActive('bulletList')} onClick={() => ch().toggleBulletList().run()} />
-          <RibbonMenuItem icon={icon4(ListOrdered)} label="فهرست شماره‌دار" active={editor.isActive('orderedList')} onClick={() => ch().toggleOrderedList().run()} />
-          <RibbonMenuItem icon={icon4(ListChecks)} label="چک‌لیست" active={editor.isActive('taskList')} onClick={() => ch().toggleTaskList().run()} />
+          <RibbonMenuItem icon={icon4(List)} label="فهرست نقطه‌ای" active={editor.isActive('bulletList')} onClick={() => applyBulletList(editor)} />
+          <RibbonMenuItem icon={icon4(ListOrdered)} label="فهرست شماره‌دار" active={editor.isActive('orderedList')} onClick={() => applyOrderedList(editor)} />
+          <RibbonMenuItem icon={icon4(ListChecks)} label="چک‌لیست" active={editor.isActive('taskList')} onClick={() => applyTaskList(editor)} />
           {/* marker glyph — lives on the ACTIVE list node; change or remove
               AFTER creation (ListMarker extension + data-marker CSS tokens) */}
           {inList && (
@@ -768,6 +805,13 @@ export function Ribbon({
       <RibbonMenuItem icon={icon4(Printer)} label="چاپ / ذخیره PDF" hint="Ctrl+P" onClick={onOpenPrintPreview} />
       <RibbonMenuItem icon={icon4(FileDown)} label="خروجی Word" onClick={onExportWord} />
       <RibbonMenuItem icon={icon4(FileCode)} label="خروجی HTML" onClick={onExportHtml} />
+      <RibbonMenuItem icon={icon4(FileArchive)} label="خروجی Persian Notes (.pnote)" hint="فرمت بومی" onClick={onExportPnote} />
+      <RibbonMenuDivider />
+      <RibbonMenuSection label="کلیپ‌بورد" />
+      <RibbonMenuItem icon={icon4(Copy)} label="کپی صفحهٔ فعال با استایل و آیتم‌ها" hint="قاب + کادرها + آیتم‌های شناور" onClick={onCopyActivePage} />
+      <RibbonMenuDivider />
+      <RibbonMenuSection label="وارد کردن" />
+      <RibbonMenuItem icon={icon4(FileUp)} label="وارد کردن فایل" hint=".pnote / .pdf" onClick={onImportFile} />
       <RibbonMenuDivider />
       <RibbonMenuSection label="سیستم" />
       <RibbonMenuItem icon={icon4(Keyboard)} label="میانبرها" hint="Ctrl+/" onClick={onShowShortcuts} />
@@ -869,19 +913,20 @@ export function Ribbon({
             </div>
           </div>
         )}
-        {/* far-left cluster: فایل (leftmost) + focus. جابه‌جایی بر اساس
-            بازخورد: برگردان/بازگردانی به سمت راستِ خوشه (کنار چیپ‌های وضعیت
-            و جست‌وجو) رفتند — دکمه‌های کوارتزیِ پرتکرار نزدیک کارِ روزمره؛
-            تمرکز و فایل کم‌کارتر و در لبهٔ چپ ماندند. The AI button was
-            REMOVED from the ribbon — the AI panel opens from the دستیار tab
-            beside the page previews (Ctrl+Shift+A still works). */}
+        {/* far-left cluster: focus (the quiet edge) + فایل + برگردان/بازگردانی.
+            جابه‌جایی بر اساس بازخورد: فایل به چپِ برگردان/بازگردانی چسبید و
+            هر سه دکمه به‌عنوان خوشهٔ روزمره کنار چیپ‌های وضعیت/جست‌وجو
+            هستند. The AI button was REMOVED from the ribbon — the AI panel
+            opens from the دستیار tab beside the page previews
+            (Ctrl+Shift+A still works). */}
         <div className="flex shrink-0 items-center gap-1 pl-1">
-          {/* حالت تمرکز + فایل — the quiet edge cluster (leftmost) */}
+          {/* حالت تمرکز — the quiet edge */}
           <RibbonButton title="حالت تمرکز (Ctrl+Shift+F)" icon={icon4(Focus)} onClick={onToggleFocus} />
-          <div className="flex items-center border-l border-ink-100 pl-1.5 dark:border-ink-800">
+          {/* فایل + برگردان/بازگردانی — the daily cluster (user request:
+              فایل next to undo/redo) */}
+          <div className="flex items-center gap-0.5 border-l border-ink-100 pl-1.5 dark:border-ink-800">
             <FileMenu items={fileMenuItems} open={fileOpen} onToggle={() => setFileOpen((v) => !v)} onClose={() => setFileOpen(false)} />
           </div>
-          {/* برگردان/بازگردانی — relocated beside the status/search cluster */}
           <div className="flex items-center gap-0.5 border-l border-ink-100 pl-1.5 pr-1 dark:border-ink-800">
             <RibbonButton title="برگردان (Ctrl+Z)" icon={icon4(Undo)} onClick={() => ch().undo().run()} />
             <RibbonButton title="بازگردانی (Ctrl+Shift+Z)" icon={icon4(Redo)} onClick={() => ch().redo().run()} />
@@ -903,7 +948,12 @@ export function Ribbon({
         mode={insertModal ?? 'edu'}
         onClose={() => setInsertModal(null)}
         onInsert={(k) => {
-          if (k.mode === 'edu') {
+          if (k.mode === 'compare') {
+            /* مقایسه بین دو یا چند چیز — the matrix block: 2 things × 2
+               feature rows to start; Enter on a column header adds a 3rd/4th
+               thing, +افزودن ویژگی adds rows (all persisted in attrs) */
+            insertBlock(editor, { type: 'matrixCompareBlock', attrs: { topic: '', colLabels: ['', ''], rowLabels: ['', ''], cells: ['', '', '', ''] }, content: [{ type: 'paragraph' }] });
+          } else if (k.mode === 'edu') {
             insertBlock(editor, { type: 'calloutBlock', attrs: { kind: k.kind, title: '' }, content: [{ type: 'paragraph' }] });
           } else if (k.kind === 'short') {
             insertBlock(editor, { type: 'questionBlock', attrs: { question: '' }, content: [{ type: 'paragraph' }] });

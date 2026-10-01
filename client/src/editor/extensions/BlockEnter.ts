@@ -36,7 +36,7 @@
  */
 
 import { Extension } from '@tiptap/core';
-import { Plugin, PluginKey, TextSelection, type Command } from '@tiptap/pm/state';
+import { Plugin, PluginKey, TextSelection, Selection, type Command } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
 import type { Node as PMNode, ResolvedPos } from 'prosemirror-model';
 import { liftListItem } from 'prosemirror-schema-list';
@@ -44,12 +44,13 @@ import { liftListItem } from 'prosemirror-schema-list';
 const key = new PluginKey('blockEnter');
 
 /** node types that behave as "a box the user is inside" for this contract */
-const BOX_NODES = new Set([
+export const BOX_NODES = new Set([
   // edu/custom blocks (all share one NodeView family with a title + body)
   'calloutBlock', 'questionBlock', 'exampleBlock', 'keyTermBlock',
   'formulaBlock', 'comparisonTable', 'timeline', 'footnoteBlock',
   'longAnswerBlock', 'highlightBox', 'referenceBlock', 'proConBlock',
   'codeOutputBlock', 'trueFalseBlock', 'mcqBlock',
+  'matrixCompareBlock', 'orderStepsBlock',
   // stock wrappers that read as "inside a box"
   'blockquote', 'listItem',
 ]);
@@ -141,6 +142,7 @@ export const BlockEnter = Extension.create({
           handleKeyDown: (view, event) => {
             const { state } = view;
             const { $from, empty } = state.selection;
+
             const isEnter = event.key === 'Enter';
 
             if (!isEnter) return false;
@@ -200,3 +202,137 @@ export const BlockEnter = Extension.create({
     ];
   },
 });
+
+/* ═══════════════════════════════════════════════════════════════════════
+   BlockBoundaryGuard — Backspace at the START of a plain paragraph that
+   FOLLOWS a box (user report: «حذف متنِ بعد کادر، متن عادی می‌رود تو باکس
+   سوال تشریحی»). Stock joinBackward merges that paragraph INTO the box's
+   last body paragraph — the plain text lands inside the question/callout
+   box without any visible boundary. Word-like rule instead: the FIRST
+   Backspace is a boundary HOP (caret → end of the box's last body
+   paragraph, where the next Backspace deletes real content instead of
+   structurally merging); the plain text is never pulled into the box.
+
+   Registered FIRST in buildEditorExtensions — ProseMirror consults
+   handleKeyDown props in plugin order and the stock keymap (StarterKit's
+   baseKeymap) already handles Backspace, so a guard registered later would
+   never run.
+   ═══════════════════════════════════════════════════════════════════ */
+export const BlockBoundaryGuard = Extension.create({
+  name: 'blockBoundaryGuard',
+
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: new PluginKey('blockBoundaryGuard'),
+        props: {
+          handleKeyDown: (view, event) => {
+            if (event.key !== 'Backspace') return false;
+            const { state } = view;
+            const { $from, empty } = state.selection;
+            if (!empty) return false; // ranges keep stock behavior
+            /* only the doc-level START of a textblock — the exact boundary
+               spot where stock Backspace does joinBackward */
+            if ($from.parentOffset !== 0 || $from.depth !== 1) return false;
+            const nodeBefore = $from.nodeBefore; // the box we'd merge INTO
+
+            /* CASE 2 — «فاصله بین دو باکس رو حذف می‌کنم، دوتا باکس ادغام
+               میشه» (user report): TWO BOXES separated by one paragraph.
+               Stock Backspace at the START of the LOWER box (or inside the
+               gap paragraph) pulls the boxes together — the SECOND press
+               then JOINS the two box NODES: borders fuse, content
+               interleaves. Word-like rule instead:
+               • Backspace 1 (caret in the EMPTY gap paragraph): the gap
+                 itself is deleted — boxes stay SEPARATE, caret lands after
+                 the upper box.
+               • Backspace 2 (caret now at the doc boundary where the gap
+                 was, box below, box above): HOP into the upper box's last
+                 body paragraph — the next Backspace deletes real CONTENT,
+                 never the border.
+               The lower box NEVER merges into the upper one. */
+            /* CASE 2b — the deeper click boundary: the caret can land inside
+               the lower BOX WRAPPER itself ($parent = the box node, offset
+               0 — PM clicks resolving to the edge put the selection in the
+               box, not in a child textblock). Stock Backspace there joins
+               the WHOLE BOX backward into the node above: the upper box and
+               its title are destroyed outright — visually «two boxes fused
+               into one». Box wrapper = never a merge source. */
+            if (isBoxNode($from.parent) && nodeBefore && isBoxNode(nodeBefore)) {
+              try {
+                const end = $from.pos - 1; // boundary between the two boxes → inside the upper box
+                const target = Selection.near(state.doc.resolve(end), -1);
+                view.dispatch(state.tr.setSelection(target).scrollIntoView());
+                view.focus();
+                return true;
+              } catch {
+                return true; // swallow rather than ever merging two boxes
+              }
+            }
+            if (nodeBefore && isBoxNode(nodeBefore)) {
+              /* empty paragraph right after a box: the gap case — delete the
+                 gap, keep the boxes apart (stock would join it INTO the box
+                 above, pulling the next box one step closer). */
+              if (isEmptyTextblock($from.parent)) {
+                try {
+                  const gapFrom = $from.before();
+                  const tr = state.tr.delete(gapFrom, $from.after());
+                  view.dispatch(tr.setSelection(Selection.near(tr.doc.resolve(gapFrom), -1)).scrollIntoView());
+                  view.focus();
+                  return true;
+                } catch {
+                  return false;
+                }
+              }
+              /* non-empty textblock after a box: hop instead of merge —
+                 covers BOTH «plain paragraph after a box» (never pull plain
+                 text into the box) AND «lower box after an upper box»
+                 (never fuse the two borders). */
+              try {
+                const end = $from.pos - 1; // just before this textblock = inside the box
+                const $end = state.doc.resolve(end);
+                const target = Selection.near($end, -1);
+                view.dispatch(state.tr.setSelection(target).scrollIntoView());
+                view.focus();
+                return true; // the join never happens
+              } catch {
+                return false;
+              }
+            }
+
+            /* CASE 3 — «بک‌اسپیس توی باکس، کل باکس رو پاک می‌کنه» (user
+               report, the STEP-2 crash behind the same complaint): with the
+               caret at the doc-level END of a box's EMPTY body paragraph,
+               `$from.nodeBefore` is the INNER paragraph — isBoxNode is
+               false — so the guard above lets the STOCK chain run, and
+               stock joinBackward lifts the empty paragraph OUT and DELETES
+               THE WHOLE BOX NODE (a box with an empty body IS just its
+               wrapper). Word-like rule: Backspace inside a box never
+               deletes the box — it empties nothing (already empty) and
+               simply holds; content deletion happens while there IS
+               content, and the box is removed via the حذف menu, not by
+               accident at its boundary. */
+            const nodeAfter = $from.nodeAfter;
+            if (
+              nodeAfter && isBoxNode(nodeAfter) &&
+              isEmptyTextblock($from.parent) &&
+              $from.parent.type.name === 'paragraph'
+            ) {
+              return true; // swallow: caret stays, box stays
+            }
+            /* CASE 3b — wrapper-internal: caret sits INSIDE the box node
+               itself ($parent = box, offset 0) with the box's own body below
+               — stock Backspace here can also lift/drop the box structure.
+               Swallow: nothing above the caret to delete that isn't the
+               box. */
+            if (isBoxNode($from.parent)) {
+              return true;
+            }
+            return false;
+          },
+        },
+      }),
+    ];
+  },
+});
+
+/* guard bust: re-trigger module graph invalidation */

@@ -49,6 +49,15 @@ app for students (medical curriculum origin, but content-agnostic):
 - Scripts: `npm run dev` (both workspaces via concurrently), `npm run seed`
   (demo user + sample data), `npm run build`, `npm start`, `npm run typecheck`
   (client + server — **must pass before any hand-off**).
+- **Non-technical launcher (added 0.9.x+):** `START-WINDOWS.bat` at the repo
+  root is the «double-click and it runs» entry: checks Node (opens the
+  download page if absent), runs `npm run dev` (predev preflight auto-creates
+  `.env`, installs deps, frees the project's stale ports), and spawns
+  `scripts/open-when-ready.ps1` which polls the loopback (v6 `::1` FIRST —
+  vite on modern Node binds ONLY ::1; a 127.0.0.1-only probe hangs forever
+  while the app is up) and opens the browser at :5173. The .bat MUST stay
+  UTF-8 **without BOM** + CRLF (chcp 65001 decodes the Persian lines).
+  `README-RUN.txt` is the Persian one-liner guide shipped with the zip.
 - Demo user: `demo@pernote.local` / `demo1234`
 - Env (see `.env.example`): `PORT`, `MONGODB_URI`, `ALLOW_DB_FALLBACK`,
   `MONGO_DEV_PORT`, `MONGO_DEV_BINARY`, `SEED_ON_START`, `JWT_SECRET`,
@@ -56,9 +65,16 @@ app for students (medical curriculum origin, but content-agnostic):
   `OPENAI_BASE_URL`, `OPENAI_MODEL`, `OPENAI_TIMEOUT_MS`.
 - **DB fallback is persistent since 0.9.x:** if `MONGODB_URI` is unreachable,
   `server/src/config/db.ts` launches the cached `mongod` binary as a real
-  process with `dbPath = server/.mongo-data` (dev only; clean shutdown wired
-  in `index.ts`). Data survives restarts. The old in-memory fallback is gone —
-  accounts no longer vanish. `.mongo-data` is git-ignored.
+  process (dev only; clean shutdown wired in `index.ts`). Data survives
+  restarts. The old in-memory fallback is gone — accounts no longer vanish.
+  **Since the OneDrive-fassert fix, the data dir lives in the local AppData
+  (`%LOCALAPPDATA%\persian-notes\mongo-data`), NOT in the repo** — WiredTiger
+  is incompatible with OneDrive/Dropbox file-lock storms and died with random
+  `fassert()` crashes when the checkout sat inside OneDrive (six .mdmp dumps
+  proved it). The legacy in-repo `server/.mongo-data` is copied to the new
+  location once at boot; override with `MONGO_DEV_DBPATH`. mongod stderr is
+  now captured so real binary errors surface in the console, and one retry
+  absorbs transient boot crashes.
 - API keys are server-side only; the browser never sees them.
 
 ---
@@ -129,6 +145,10 @@ client/src
                         session.ts (CollabTransport ws + CollabSession yjs doc/seat/presence),
                         useCollabSession.ts (React seam: preflight + session lifecycle),
                         editorSync.ts (adapter: doc observer fan-out, structure publish, seeding)
+  pnote/              ★ native file formats (§۶ب): format/zip/assets/exportPnote/
+                        importPnote/validate (the .pnote package) + pdf/ (parsePdf,
+                        reconstruct, importPdf — best-effort external import);
+                        UI: components/editor/ImportFileModal.tsx + EditorPage exportPnoteFile
 
 client/harness/       React-free harness for the pagination engine (Chrome --dump-dom)
 scripts/              seed-booklet.mjs, fetch-icons.mjs, qa-*.mjs (regression probes)
@@ -244,7 +264,7 @@ Pagination never counts characters — only real DOM measurement
 | `line` | break at rendered line boundaries (binary search on `coordsAtPos`), never mid-word | paragraph, blockquote, formulaBlock |
 | `item` | list items move whole; `orderedList` continues numbering via `attrs.start` | bulletList, orderedList, taskList |
 | `rows` | table rows move; the **header row repeats** on the continuation | table |
-| `container` | edu blocks are FLOW containers: inner content splits by its own rules and the **frame redraws on both pages** | calloutBlock, questionBlock, exampleBlock, keyTermBlock, comparisonTable, timeline, footnoteBlock, longAnswerBlock, highlightBox, referenceBlock, proConBlock, codeOutputBlock |
+| `container` | edu blocks are FLOW containers: inner content splits by its own rules and the **frame redraws on both pages** | calloutBlock, questionBlock, exampleBlock, keyTermBlock, comparisonTable, timeline, footnoteBlock, longAnswerBlock, highlightBox, referenceBlock, proConBlock, codeOutputBlock, matrixCompareBlock, orderStepsBlock |
 | `atomic` | never split — the object moves as a whole | image, equation (display), equationInline, inlineIcon, pageBreak, horizontalRule |
 
 Special rules: widow/orphan control (Word-style, never <2 lines each side);
@@ -285,6 +305,138 @@ may ever diverge from the editor.
   not «fix» it.
 - HTML export exists too. `renderMathInHtml = renderEquationsInHtml ∘
   renderFormulasInHtml` — KaTeX formulas first, then structured equations.
+
+## ۶ب. ★ Mechanism 9 — Native `.pnote` package + normal-PDF import
+
+Two ADDITIVE file features with completely separate pipelines — never merge
+them (they share nothing but the §4 target shape):
+
+```
+NATIVE (lossless):      §4 document → exportPnote → .pnote (ZIP) → importPnote → §4 document
+EXTERNAL (best effort): PDF bytes → parsePdfText → reconstruct  → §4 document
+```
+
+### .pnote — the native, lossless, editable format (Part A)
+
+- `client/src/pnote/`:
+  - `format.ts` — the package contract: `format:'persian-notes'`,
+    `formatVersion:1`, limits (128MB package / 32MB document.json / 512
+    assets / 16MB per asset), `PnoteError` codes + the Persian user
+    messages (`pnoteUserMessage`).
+  - `zip.ts` — hand-rolled ZIP reader/writer (STORED + DEFLATE-raw via
+    `CompressionStream`/`DecompressionStream`; zero deps). Entry-name
+    grammar `isSafeEntryName` rejects `..`, absolute, backslash and drive
+    paths; `hasZipEOCD` pre-gates garbage files to a clean
+    «not-a-package».
+  - `assets.ts` — data-URL ⇄ `pnote-asset:<id>` swap (no filesystem or
+    blob URLs ever serialized).
+  - `exportPnote.ts` — validate ONCE with the §4 validator, extract assets
+    once, build the ZIP once (§23 performance budget).
+  - `importPnote.ts` — strict manifest gate; FUTURE formatVersions are
+    rejected (`unsupported-version`), never silently reinterpreted (§3);
+    missing asset entries reject the whole import (`missing-asset`).
+  - `validate.ts` — `pnoteValidateDocument`: the client twin of the §4
+    validator autosave/collab already use; the import boundary gate (§21).
+- Package layout: `manifest.json` (`{format, formatVersion, createdAt,
+  app, documentId — a RANDOM portable id, NOT the Mongo _id, title,
+  assets:[{id, file, bytes}]}`) + `document.json` (the §4 content object
+  VERBATIM — pageBreak/pid/kind/auto pages, headings, marks, alignment,
+  lists, tables + design tokens, equation ASTs, edu-block attrs,
+  floatingElements with geometry, noteDesign) + `assets/<id>.<ext>`.
+- Privacy (§22): the payload is built ONLY from the §4 content object —
+  passwords/tokens/JWT/collab session ids/user ids cannot be inside
+  (pinned by test).
+- UI: ribbon «خروجی Persian Notes (.pnote)» (EditorPage `exportPnoteFile`);
+  «وارد کردن فایل» → `components/editor/ImportFileModal.tsx` (ONE modal,
+  two pipelines; import into a NEW note or with EXPLICIT replace
+  confirmation). The apply path commits through the EXISTING pipelines
+  (`notesApi.create`, or `setPages` + collab `structureCreatePage`/
+  `seedPageFragmentFromJson`/`opUpsertFloat`/`commitFloats`) — the binary
+  package NEVER travels through yjs (§8).
+- BUGFIX («۲ صفحه خروجی گرفتم، صفحهٔ اول خالی ایمپورت شد»): applyImport must
+  assign FRESH page ids (`imp-<ts>-<rand>`) to the imported pages, never the
+  package's ids. EditorPage mounts per ROUTE (App.tsx) and Page builds its
+  TipTap editor ONCE from mount-time content keyed by `page.id` — and every
+  note's first page id is `p1`, so an imported `p1` collided with the
+  previous note's still-mounted p1 editor: the imported content WAS in
+  React state but the live editor kept rendering the old document (page 1
+  blank; page 2 remounted because its key differed). Room replace path:
+  create the fresh-id chain FIRST, then `structureDeletePage` the old ids
+  LAST (creation anchors reference the previous page; stale editors lose
+  their old fragment to the room's own delete). SECOND LAYER (covers the
+  default «ایجاد جزوهٔ جدید» path AND the latent /editor/new → real-id
+  switch): Page keys are NOTE-SCOPED (`key={${id}:${page.id}}`) — page ids
+  alone are not unique across notes, and EditorPage persists across
+  /editor/:id navigations, so the previous note's mounted p1 editor could
+  render over ANY newly loaded/created note. ID CONTRACT: mergePages
+  writes no pid for page 1 and split re-normalizes it to `p1` on the next
+  load — safe, because that load mounts fresh editors. Probe:
+  `client/scripts/pnote-roundtrip.mjs` (export→import→split + id contract).
+
+### Normal-PDF import — best-effort EXTERNAL format (Part B)
+
+- `client/src/pnote/pdf/`:
+  - `parsePdf.ts` — hand-rolled, dependency-free extractor: xref chain +
+    ObjStm, FlateDecode, the text operators (BT/ET/Tf/Td/TD/Tm/T*/Tj/TJ…),
+    ToUnicode CMaps with DERIVED code width (2-byte Identity-H CID pairing
+    vs 1-byte WinAnsi — pairing blindly corrupts one of them), font-object
+    windows bounded at their own `endobj` (a window bleeding into the next
+    font's `/ToUnicode` once mis-decoded Latin as CJK). STALE-XREF FALLBACK:
+    every object lookup goes through `resolveObjOffset` — the xref offset is
+    VERIFIED to point at `N G obj` (incremental updates leave stale entries)
+    and falls back to a bounded raw scan (`findObjOffset`), so hand-patched
+    PDFs still extract. CMap-LESS hex strings (CID fonts without /ToUnicode)
+    get a byte-shape heuristic (`tryTwoByteHex`: even bytes ≤ 0x10, no NUL
+    low bytes → decode as big-endian 2-byte codes) so Persian text lands
+    even when the CMap is missing. Per-page content
+    assembly → EXACT page boundaries. Limits 100MB/1000 pages; encrypted
+    → honest refusal; embedded PDF JS ignored; image-only pages flag
+    `imageOnly:true` — NEVER fake OCR (§16).
+  - `reconstruct.ts` — runs→lines→paragraphs; headings by size vs the
+    modal body size; paragraph split by the page's OWN median leading (a
+    fixed pt threshold mis-split normal 15pt-leading text); bullet/ordered
+    list merging (ONE list node, not one per line); a mid-block DIRECTION
+    flip is a hard block boundary (merging would erase the Persian line's
+    rtl); per-line `rtlShare ≥ 0.34` → `dir:'rtl'` (existing RTL
+    architecture, no global direction hacks).
+  - `importPdf.ts` — entry point + Persian messages; scanned/no-text →
+    the clear Persian scanned-PDF error; partial extraction keeps what
+    succeeded and reports `partial:true` (§17).
+- One PDF page → one Persian Notes page via the EXISTING pageBreak merge
+  (no second page system); the merged doc passes `pnoteValidateDocument`
+  before commit; empty (scanned) pages keep their boundary as an empty
+  page.
+
+### Tests & harness rules
+
+- `server/src/test/pnote.test.mts` (23 tests): complex-doc round-trip
+  (page ids p1–p4/kinds/auto, marks, alignment, lists, tables + design
+  tokens, equation AST deep-equal, edu-block attrs, floats geometry,
+  PNG asset byte-identical, RTL/mixed), integrability via the shared
+  validator + `splitDocIntoPages`, corrupt/truncated/future-version/
+  path-traversal/bad-manifest/missing-asset rejections, privacy scan.
+- `server/src/test/pdfimport.test.mts` (16 tests): fixtures are BUILT
+  in-test (uncompressed content streams + a real 2-byte-CID ToUnicode
+  CMap): 3-page boundaries, paragraph/heading reconstruction, Persian CID
+  extraction + RTL, list merging, scanned detection, corrupt rejection,
+  partial import, §4-shape editability/export-readiness.
+- `scripts/qa-pnote.test.mts` (32 client-side tests, `npx tsx --test`
+  with `TSX_TSCONFIG_PATH=client/tsconfig.json`): the SAME matrix as the
+  server suites, driving the CLIENT pipelines directly — pnote round-trip
+  against the §4 page projection (`splitDocIntoPages`), security matrix,
+  PDF import against REAL flate fixtures, docPages parity. FIXTURE RULE:
+  pdf fixtures are built latin1, so a literal `•` (U+2022) cannot appear
+  in a content stream — use `·` (U+00B7, matched by BULLET_RE) or octal
+  escapes.
+- TEST-HARNESS RULE: these suites import client modules at RUNTIME via
+  the `clientModule()` URL helper (tsx resolves it). NEVER write
+  `typeof import('../../../client/…')` in them — a type-position client
+  path drags the file under the server project's `rootDir` (TS6059).
+  Use inline structural casts (the collab.test.mts pattern).
+- Run: `cd server && npx tsx --test --test-timeout=60000
+  src/test/pnote.test.mts src/test/pdfimport.test.mts`.
+- ZERO new dependencies for both features (ZIP and PDF parsing are
+  hand-rolled on standard streams).
 
 ## ۷. ★ Mechanism 4 — AI system
 
@@ -352,6 +504,36 @@ A full formula editor, independent of input/output LaTeX:
   old `0` values to `-1` (inherit). Global block styling:
   `utils/eduBlocks.ts` (`minimal` | `tinted` | full object) persisted in
   `Settings.editor.eduBlocks` (Mixed — the client owns the shape).
+- **NEW edu blocks (user request: «کادرای آموزشی با ویژگی عای بیشتر…
+  مثلا مقایسه بین چندتا چیز»):**
+  - `matrixCompareBlock` (مقایسهٔ چندگانه) — N columns (چیزها, 2..4,
+    Enter in a column header appends) × rows (ویژگی‌ها, up to 12, the
+    «+ افزودن ویژگی» button appends). Column/row labels + every cell live
+    in ATTRS (`colLabels` / `rowLabels` / `cells` row-major) — persist +
+    export for free, same pattern as proCon/MCQ options. Free text under
+    the matrix is the real PM contentDOM. Static renderHTML mirrors the
+    table for print/Word.
+  - `orderStepsBlock` (مراحل به‌ترتیب) — numbered step lines in `steps`
+    attrs (Enter inserts a step below the caret, ≤10); PM contentDOM below.
+  - Both wired EVERYWHERE the edu family is registered: Page.tsx (BOTH
+    extension lists — live editor + static schema), BlockEnter BOX_NODES,
+    paginationPolicy (CONTAINER → flow-engine splits them), documentProbe,
+    eduBlock contextual tab (convert/type picker + TITLE_ATTR),
+    eduBlockStyleModalHost (STYLEABLE + TITLE_ATTR → شخصی‌سازی کادر
+    applies), listCommands EDU_BOX_RE (list seam skips them),
+    contextMenuItems (درج menu + right-click case), SlashCommand, and
+    `index.css` (`.edu-matrix` / `.edu-steps` families + tinted variants).
+  - TITLE CONTRACT pinned by probe: the SAME editableTitleView serves the
+    whole family — typing into any block's title persists via
+    setNodeMarkup, the caret never escapes (MutationObserver + caret
+    restore), Enter exits below the block, Backspace in an empty title
+    never eats the block. Probe:
+    `cd client && npx tsx scripts/edu-title-behavior.mjs` (real TipTap +
+    real NodeViews in jsdom; also covers matrix cells/labels and steps).
+    PROBE INFRA: iconAssets.ts uses Vite `import.meta.glob` — the probe
+    loads `edu-title-behavior.mjs.loader.mjs` FIRST, a node loader hook
+    serving an iconAssets STUB, and stubs jsdom layout
+    (getClientRects/getComputedStyle/scrollBy) BEFORE importing blocks.ts.
 - **Ribbon** (`editor/ribbon/`): main tabs (خانه / افزودن / طراحی / مراجع /
   بازبینی / فایل) + contextual tabs from the resolved selection. Rule: every
   button runs an existing TipTap command or an existing page callback —
@@ -383,6 +565,28 @@ A full formula editor, independent of input/output LaTeX:
   Custom glyphs render via CSS counters in `index.css` + `printCss.ts`
   (1:1). Change/remove after creation from the فهرست section of the ribbon
   or the right-click تنظیمات پاراگراف.
+- **List-vs-box seam (listCommands.toggleListAroundBoxes):** ALL list
+  gestures (نقطه‌ای/شماره‌دار/چک‌لیست — ribbon, right-click تنظیمات
+  پاراگراف, ویرایش دسته‌ای) go through `listCommands.ts`, which runs the
+  stock toggle PER TOP-LEVEL BLOCK and SKIPS edu boxes (کادر آموزشی/سوال)
+  entirely — a selection spanning plain lines AND a box used to wrap the
+  WHOLE BOX as one giant list item (the box glued under a bullet, title
+  swallowed: «متن‌های عادی بزور مینداخت تو باکس»). A selection fully
+  inside ONE box still lists the box's own paragraphs (stock; desired).
+  Probe: `cd client && npx tsx scripts/list-seam-behavior.mjs`.
+- **Flow-engine list-in-box split (overflowFlow.tryContainerSplit):** a
+  box whose FIRST inner child is a list now splits at ITEM boundaries (the
+  continuation opens a NEW frame marked `pnFlowCont:true` carrying the
+  rest); before this, the split gave up (`null` → whole-box move → a lone
+  overfull box could never flow → every edit on the full page started
+  jumping). The marker is also stamped by the generic container split and
+  read by `tryBackflowContinuation` (children re-join the PREVIOUS page's
+  frame via the marker-tolerant sameJSON; attrs-twin fragment frames,
+  never user content). The `second-block` overflow fallback keeps a
+  leading container's frame on the page (`policyFor(...).break ===
+  'container'` → cutIndex 1) so the frame alone can never pin the page
+  overfull (isOverflowing true forever → the fallback re-fired and
+  cascade-evacuated the whole box).
 - **InlineIcon:** SVG icons from the picker insert as an inline atomic node
   (`img[data-inline-icon]`), flowing like a character and scaling with
   `em`. After insert the caret is parked AFTER the node (TextSelection) —
@@ -586,7 +790,9 @@ Reference: `client/src/docs/vercel-design.md`. Summary:
 - `.env` is not committed (template: `.env.example`).
 - Dev DB fallback requires the first `npm install` to have fetched the
   mongod binary (cached under `~/.cache/mongodb-binaries`); override with
-  `MONGO_DEV_BINARY`. Data dir: `server/.mongo-data` (git-ignored).
+  `MONGO_DEV_BINARY`. Data dir: local AppData `%LOCALAPPDATA%\persian-notes\mongo-data`
+  (out of sync folders on purpose — OneDrive + WiredTiger = fassert crashes);
+  override with `MONGO_DEV_DBPATH`.
 - QA logs/screenshots (`*.log`, `qa-*.png`, `pn_note_tmp*.json`, `_t_*`) are
   dev-environment temporaries, not product files.
 - The project lives in a local checkout without accessible git metadata in
@@ -631,6 +837,85 @@ Reference: `client/src/docs/vercel-design.md`. Summary:
   `print-color-adjust: exact` hoisted to `html/body` as well. Design-attr
   backgrounds (navy/striped) were already solid and only needed (c).
   Keep print hairlines SOLID — never reintroduce alpha borders for print.
+- Cover pages blank after reopen + empty covers inside .pnote (user:
+  «برگشتم جزوه رو ادامه بدم، عوض صفحات ایمپورت‌شده صفحه سفید بود» + «.pnote
+  صفحه اول رو فقط با قالب خالی نشون می‌داد»): ONE root cause, one-line
+  fix. `splitDocIntoPages` (utils/docPages.ts) returns the per-page cover
+  metadata under the field name `coverAttrs`, but ALL THREE EditorPage
+  call sites read `c.cover` — always undefined, so every cover sheet
+  loaded as `kind:'cover'` with NO artwork (white sheet + frame only).
+  The white sheets then flowed into .pnote exports and version saves;
+  the typed pages were intact, but a cover-first note looked wiped on
+  every reopen. Fixed by reading `c.coverAttrs` (the wrapper's type was
+  also lying — declared `cover?` while the pure function returns
+  `coverAttrs?`); verified in-browser: reload keeps COVER artwork +
+  titles on both imported covers, and export→import round-trip preserves
+  covers WITH artwork and the typed page text (pnote suite 23/23,
+  collab 46/46 after the fix).
+- Question-box triple bug (user: «باکس سوالا … بک‌اسپیس نداره / cursor نشون
+  داده نمی‌شه وقتی دوبار کلیک می‌کنی / حذف فاصله بین دو باکس، ادغام میشن»):
+  (1) dblclick word-select in the nested `.edu-title-text` spans produced
+  text→PARENT-ELEMENT ranges (Chromium starts the range at the word start
+  and extends past the span boundary when the word sits at the span's
+  START — RTL titles' first word is nearest the icon) that render as
+  NOTHING; fixed with a `dblclick` handler on the span that rebuilds the
+  selection INSIDE the text node via `Intl.Segmenter` word boundaries
+  (`blocks.ts editableTitleView`). (2/3) Two `Backspace` merge accidents
+  lived in `BlockEnter.ts BlockBoundaryGuard`: stock joinBackward at the
+  boundary deleted the EMPTY GAP paragraph between two boxes into the box
+  above (harmless-looking) and then fused the two box NODES on the next
+  press. The guard now handles the gap case explicitly: empty gap
+  paragraph → delete the GAP itself (boxes stay separate, caret lands
+  after the upper box); non-empty textblock after a box (plain OR lower
+  box) → boundary HOP into the upper box's last body paragraph. Verified
+  in-browser: Backspace chain through two adjacent boxes never yields one
+  box, and dblclick selects a full Persian word (`تستی`, same-node Range).
+
+  **Follow-up report (باکس‌ها هنوز ادغام می‌شدند + تیتر سوال تشریحی
+  بدون کرسر/غیرقابل‌حذف):** live reproduction showed the FIRST fix was
+  written into the WRONG layer — `BlockEnter.ts BlockBoundaryGuard` —
+  while the ACTIVE thrower lives in `Page.tsx buildEditorExtensions →
+  editorProps.handleKeyDown` (view props outrun plugins, and ProseMirror
+  consults BOTH; the two had drifted). Worse, its condition was
+  `depth === 1 && parentOffset === 0`, but the real box-killers resolve
+  DEEPER — the caret sits at depth 2 (inside the box's own body
+  paragraph) with `nodeBefore = null`, so stock joinBackward reached the
+  box node and DELETED THE WHOLE BOX (title + all) on press 2 — exactly
+  what the user saw as «باکس‌ها ادغام می‌شوند» / «باکس پاک می‌شود».
+  Verified live positions: after deleting the gap text between two
+  boxes, the caret lands at the start of the lower box's first body
+  paragraph (depth 2, `$from.index(0)-1` = upper box) → press = upper
+  box gone; at the END of a box's empty body paragraph (depth 1 inside
+  the wrapper) → stock lifts the paragraph out and the box wrapper dies.
+  The guard in `Page.tsx` is now depth-agnostic (`empty &&
+  parentOffset === 0`, prev doc child via `$from.index(0)-1`) with three
+  explicit cases: (a) previous doc child is a box → boundary HOP into
+  its last body paragraph (never delete/merge structure); (b) caret
+  inside a box's own EMPTY body paragraph → swallow (box survives; the
+  حذف menu removes boxes deliberately); (c) plain textboxes untouched →
+  stock behavior. `BlockEnter.ts BlockBoundaryGuard` mirrors the same
+  rules for the plugin layer so the two surfaces can never disagree.
+  Selection visibility in the title spans: `.edu-title-text` now sets
+  `caret-color: currentColor` plus an explicit `::selection` paint
+  (`rgba(0,112,243,.3)` with `color: inherit`) — Chromium painted NO
+  highlight over the family-colored title text, which read as «cursor
+  نداره / نمی‌شه متن رو انتخاب کرد». Verified in-browser: word-selection
+  ranges land inside the text node AND render visible.
+
+  **Regression + final rule (титр غیرقابل ویرایش شد):** the depth-agnostic
+  guard broke TITLE EDITING — while the user types in a title span, PM's
+  INTERNAL selection can still sit in the box's EMPTY body paragraph, so
+  the guard matched its case and swallowed/hopped every Backspace typed
+  in the title («متن روی سوال حذف نمیشه، بک‌اسپیس کار نمی‌کنه»).
+  IRON RULE for both guard surfaces (Page.tsx editorProps +
+  BlockEnter.ts plugin): the structural Backspace guard must FIRST check
+  `window.getSelection().anchorNode` — if the REAL DOM caret lives inside
+  a NESTED_EDIT_SPANS contenteditable (edu title, MCQ option, pro/con,
+  code area), skip the guard entirely; those keys are content edits
+  routed to the span path (execCommand → MutationObserver →
+  setNodeMarkup). Verified live after the fix: Backspace deletes title
+  chars and syncs attrs, typing works, dblclick word-select visible, and
+  all box-merge protections hold.
 
 ---
 
@@ -735,21 +1020,351 @@ seat holder's merged doc, else `docJsonFromYRoom` projection) is a
 fallback that keeps Mongo fresh when no seat holder is saving; both write
 the SAME §4 storage shape.
 
-**Known limits (honest):** page add/delete on client A appears on client B
-as structure sync (new pages start empty until A's text ops for them
-arrive — acceptable for this milestone); float sync is commit-oriented so
-live drag shadows are local-only; cursor/selection sharing is NOT
-implemented (presence = avatars + count + page only); title co-editing is
-not wired to the room yet.
+**Hardening milestone (September 2026) — what changed on top of the
+foundation above (nothing foundational was rebuilt):**
+
+- **Page structure is SEMANTIC (canonical):** `pageOrder` (Y.Array of
+  pageIds) + `pageMeta` (Y.Map id → {kind, auto}) are the ordering/attribute
+  authority; `structure.pages` remains only a legacy projection mirror.
+  CREATE/DELETE/MOVE/KIND/AUTO are entry-level ops
+  (`client/src/collab/session.ts` opCreatePage/opDeletePage/opMovePage/
+  opUpdatePageMeta; thin wrappers in `collab/structureSync.ts`). pageNumber
+  is DERIVED (idx+1) at reconcile — never identity, never synced.
+- **Delete/move race hardening:** opMovePage aborts when the page was
+  deleted concurrently and falls back to append when its anchor is gone;
+  `reconcilePagesFromStructure` collapses duplicate ids (first occurrence
+  wins) — no phantom pages, no duplicate editors on one fragment.
+- **Page-creation race:** the receiving client's reconcile uses the NEW
+  page list for the same-tick float merge, and fragment binding is by
+  NAME (`page:<pageId>`), so content ops bind with zero ordering
+  assumptions — the old "new pages start empty until text ops arrive"
+  limitation is GONE (content follows structure through the normal CRDT
+  path, verified by tests).
+- **Floats are per-object Y.Maps** (`floatObj:<pageId>` → objectId →
+  property Y.Map): property-level merge — A's x change and B's width change
+  both survive; same-key conflicts converge via yjs LWW-per-key. Floating
+  TEXT rides the same property map (`text` key) — collaborative state, not
+  DOM-only. `collab/floatSync.ts` diffs+patches; the `floats:<pageId>`
+  'list' key remains the §4 persistence mirror only.
+- **TITLE co-editing is WIRED (§13):** local title edits publish through
+  `metadataSync.publishTitle` → Y.Map 'metadata' + `metadata` frame
+  (seat-gated; Y.Map equality makes same-value keystrokes free); remote
+  titles mirror into React without triggering autosave (the room persists
+  the title itself via pendingTitle → persistRoom — no per-keystroke
+  version snapshots). Concurrent edits converge (yjs); the title rides the
+  room state on reconnect. Metadata boundary (§14): ONLY `title` is
+  collaborative; subjectId/chapter/section/tags/favorite/trash stay
+  server-only (documented in `collab/metadataSync.ts`).
+- **Protocol validation (§28):** `server/src/collab/protocol.ts` — zod
+  strict schemas for EVERY client→server frame (bounded base64 ≤8 MB,
+  id pattern checks, `doc` shape check). The hub dispatches ONLY through
+  `parseClientFrame`; malformed/forged frames (unknown types, forged
+  userId/canEdit, oversized payloads, bad ids, non-JSON) are dropped
+  BEFORE touching room/session state. Identity fields are not even
+  accepted by the schemas (server-derived only, §27). Client-side: the
+  session shape-checks `seats` entries, `joined` numerics and the
+  `restored` payload.
+- **Persistence hardening (§15–§17):** room persistence is now
+  IDEMPOTENT (skips the Mongo write when canonical state == lastSavedDoc
+  and title unchanged — no revision churn, less 409 exposure) and
+  RETRY-SAFE (a failed flush keeps `dirtySince` set → retried next tick;
+  a transient Mongo failure can no longer silently drop unsaved collab
+  state). The stale-snapshot guards are unchanged: client payloads built
+  from the room's canonical state (schedulerBuildPayload), server-side
+  text-length guard on the `doc` frame.
+- **Known limits (honest):** float sync is commit-oriented so live drag
+  shadows are local-only (by design, §10); cursor/selection sharing is NOT
+  implemented (presence = avatars + count + page — awareness infrastructure
+  exists, but wiring caret presence would require invasive EditorPage
+  changes; documented decision, correctness > feature count); unsaved
+  collaborative state is lost if the server process dies before a flush
+  (rooms are memory-only; the flush interval bounds the loss window at
+  ROOM_PERSIST_INTERVAL_MS = 5s).
+
+**UX hardening milestone (September 2026) — verified behavior on top of the
+above (nothing foundational was rebuilt):**
+
+- **Explicit view-only state model (§2/§31/§33):** `CollabSessionState`
+  carries `viewOnlyReason: 'transferred' | 'released' | 'revoked' |
+  'note-deleted' | null` — WHY this tab is view-only, distinct from
+  `denyReason` (the join-time outcome). The old tab of a takeover shows
+  «ویرایش در پنجرهٔ دیگر», a stale-released seat «جایگاه ویرایش آزاد شد»,
+  revocation «دسترسی ویرایش ندارید» — each recoverable or terminal
+  appropriately: `requestSeat()` is a hard no-op while `denied: forbidden`
+  or `note-deleted` (no retry loops against permanent denials), and a
+  fresh `joined` frame resets stale mid-session reasons (verified by
+  tests driving the frame handler directly).
+- **Note deleted/trashed while editing (§29/§45):** `handleCollabNoteRemoved`
+  (server/collab/hub.ts, called from routes/notes.ts on trashed-group-note
+  PATCH and on DELETE) sends `{t:'note.deleted'}` to every connected
+  client, releases all seats, closes sockets with the existing
+  `NOTE_DELETED=4006` code, clears room connections and tears the room down
+  (no awareness leak, no lingering Y.Doc). `persistRoom` already refused
+  trashed notes — now PINNED by a test against a real in-memory Mongo: a
+  trashed note receives NO persistence write, so autosave can never
+  resurrect it. Clients land in view-only with «این یادداشت حذف شده است».
+- **Float drag policy (§23/§24):** a LOCAL gesture (drag/resize/rotate)
+  registers the object via `setProtectedFloat` (hooked to the existing
+  `onLiveGeometry` channel — gesture start/end only, no pointermove
+  traffic); `reconcileFloatsFromSession` skips remote geometry for that
+  ONE object while protected and still merges every other object. The
+  pointerup commit republishes final geometry → canonical convergence, so
+  the skip can never become a permanent divergence (verified by tests).
+- **Delete-wins tombstones (§24):** `opDeleteFloat` tombstones the object
+  id (session-local `floatTombstones`, bounded at 256/page); the reconcile
+  drops local-only copies of tombstoned ids instead of keeping them — the
+  race "A deletes while B's mirror lags" can no longer resurrect the
+  object into autosave/exports. A deliberate re-create (`opUpsertFloat`)
+  clears the tombstone (verified by tests).
+- **Presence popover (§6/§7):** the presence chip is now a button opening
+  a compact session popover — per collaborator: avatar, name, and their
+  current page as «صفحه ۵» derived from the chip's new `pageIds` prop
+  (the ordered local page list — pure projection, no new protocol);
+  unknown/not-yet-synced ids degrade to «صفحه‌ای دیگر»; empty room shows
+  «هم‌ویرایشگری آنلاین نیست». NOT member management (that stays in Group
+  surfaces). Remote presence never navigates the local user anywhere.
+- **Remote selection stability (§8, verified by code inspection, no change
+  needed):** y-prosemirror's binding snapshots the LOCAL selection as
+  RELATIVE positions before every remote transaction applies and restores
+  it afterwards (`beforeTransactionSelection` + `restoreRelativeSelection`
+  in y-prosemirror's sync plugin) — the caret survives unrelated remote
+  edits BY CONSTRUCTION, including inside the active equation (its
+  NodeView `update()` repaints only when the serialized AST actually
+  differs and clamps the caret, never flattening it; §9). The Ribbon's
+  contextual freeze (`nonLivePanelOpen`) already prevents open panels from
+  unmounting on context switches (§22). No code change was required —
+  documented here so nobody "fixes" it later.
+- **Resource cleanup (§41, verified by code inspection):** the session's
+  `destroy()` clears the heartbeat interval, destroys awareness and closes
+  the transport (StrictMode-safe: `useCollabSession` cleans up on unmount);
+  FloatingLayer disconnects its ResizeObserver and removes all window
+  listeners on unmount; the presence popover's outside-click listener is
+  scoped to its open state; the doc observer returns an unsubscribe
+  function wired through every effect. `handleCollabNoteRemoved` now also
+  clears `awarenessByRoom` on teardown.
+- **BUGFIX — unexplained view-only for a late creator/admin (user report,
+  September 2026):** joining a note whose 4 seats were ALL taken produced
+  only `joined{seat:'view'}` — no `denied` frame, so the client showed a
+  bare «فقط مشاهده» with no reason, no banner and no retry (this hit the
+  note's CREATOR/ADMIN exactly like anyone else: the seat cap is a SESSION
+  cap that applies to everyone). The hub now sends `denied:capacity` BEFORE
+  `joined` in that case (both frames in the join path), the chip labels
+  the `acquiring` state honestly («در نوبت جایگاه ویرایش…» instead of
+  «فقط مشاهده»), and when capacity-blocked the presence popover carries
+  the seat-request action («دریافت جایگاه ویرایش») — the honest recovery
+  path, NOT an upgrade/downgrade control (permission-denied users never
+  see any retry affordance, §33). The popover z-index was lifted to the
+  ribbon-panel level (z-[300]) so ribbon dropdowns can't paint over it.
+  NOTE on the same report: this codebase contains NO upgrade/downgrade
+  modal reachable from the editor chip — the only role-change UI is the
+  Group Members panel's role Select (in GroupDetailPage). If a user still
+  sees an unexpected panel on chip click, check for a stale client bundle
+  (hard refresh) before hunting a bug.
+  Regression test: `a creator arriving late (capacity full) gets
+  ok:false=full — hub must send denied:capacity` (collab.test.mts).
+- **Performance posture (§39/§40, unchanged this milestone by design):**
+  the typing hot path is ONE getJSON per changed page + `markDirty()`
+  (one boolean + state transition); HTML/plainText derive at save/export
+  time; thumbnails re-serialize only pages whose content object identity
+  changed (400ms debounce); the sidebar is memoized on page-STRUCTURE
+  identity; presence rides the 15s heartbeat + page-change events with a
+  120ms server-side coalescing window; float commits are gesture-scoped.
+  No JSON.stringify of the full document, no buildFullHtml, no Mongo or
+  REST traffic, no thumbnail rebuild, and no presence broadcast happens
+  per keystroke (verified by reading the hot path: onEditorUpdate →
+  setPages + markDirty only).
 
 **Tests:** `server/src/test/collab.test.mts` (node:test) — seat atomicity
 (4 cap, race-for-seat-4, 50-competitor), stale-seat reaping, reconnect
 re-bind, multi-tab takeover, revocation, two-client CRDT convergence, echo
 suppression, seed idempotency, page-id derivation parity + shared-fragment
-convergence. Run: `cd server && npx tsx --test src/test/collab.test.mts`.
-End-to-end live-server probe: `node scripts/qa-collab-ws.mjs` (real WS:
-upgrade auth, join/seat, seed parity over state64, sync steps, update
-fan-out + ack, presence, non-member join rejection 4003, heartbeat/leave).
+convergence; PLUS the hardening matrix: CREATE_PAGE convergence (structure
++ meta + same-fragment binding + immediate content), entry-level
+DELETE_PAGE (others untouched), concurrent DELETE+MOVE convergence (no
+duplicates/phantoms), page-id stability across room re-seed, per-property
+float merge (x vs width both survive), same-key LWW convergence, floating
+text collaboration, floats-on-deleted-page never reappear, title
+convergence + reconnect persistence + metadata boundary, SYSTEM restore
+replacing structure/fragments/floats deterministically, and protocol
+validation (forged identity, oversized, malformed); PLUS the UX-milestone
+matrix: view-only reason mapping (transfer/release/revocation/note-deleted,
+requestSeat gating, fresh-join reset — client session driven through its
+frame handler), float drag protection (remote geometry skipped for the
+gestured object, others still merge, convergence after pointerup), delete-
+wins tombstones (stale mirror dropped, re-create un-tombstones), and
+persistRoom refusing a trashed note against a REAL in-memory Mongo (no
+resurrection through autosave); PLUS the RELIABILITY matrix (§17
+milestone, real in-memory Mongo per test): normal durable persistence
+with generation recording, idempotent no-op flush (no revision churn),
+Mongo-failure injection (dirty retained, nothing written, retry
+converges), REST-race (room write never overwrites a concurrent REST
+PATCH; re-capture converges; revision only moves forward), generation
+guard (old generation aborts against a newer stored generation),
+trash+delayed-flush (no resurrection, no revision bump), corrupt
+persisted snapshot refused at room seed, corrupt restore payload rejected
+(throw + explicit 400 to the user), restore-bumps-generation (stale flush
+cannot resurrect pre-restore content), graceful shutdown flush (bounded,
+unsaved collaborative state survives), page-id writeback + re-seed
+stability, and structured-content durability (equation AST / edu-block
+attrs / table design tokens survive a durable round-trip as nodes).
+Run: `cd server && npx tsx --test src/test/collab.test.mts`.
+
+Live-server probe: `node scripts/qa-collab-ws.mjs [baseUrl]` (REAL HTTP +
+WS against a running server, default :4000): two users register, a group
+is created, B is granted membership + `admin` role directly at the DB
+level (membership is service-layer; a plain `member` is read-only BY
+RULE, so admin gives the probe two ACTIVE editors), a group note is
+created via `POST /api/groups/:id/notes`, both clients join over real
+WebSocket (JWT upgrade auth), seed parity over state64 is asserted,
+concurrent yjs updates fan out both ways, the `persisted` durability ack
+arrives, the durable Note is polled until BOTH edits are stored,
+reconnect re-joins with an active seat and answers a real sync.step1
+(state-vector diff), and the test note is deleted. Exit code 0 = all
+assertions passed.
+
+---
+
+## ۱۷. ★ Mechanism 8 — Durable collaborative persistence (§ reliability
+
+> **What changed:** the room flush is no longer a best-effort read-
+> modify-write. It is a MONOTONIC GENERATION-GUARDED, atomically
+> conditional write, the shutdown lifecycle flushes dirty rooms boundedly,
+> every snapshot boundary validates structure, and clients learn about
+> durability through an ack frame. Foundations were NOT rebuilt: same
+> Yjs/WebSocket/TipTap/autosave/permission architecture.
+
+### The durability chain (the ONE contract)
+
+```
+local edit
+  → yjs canonical room state
+      (room.doc 'update' event → roomGeneration += 1, markRoomDirty)
+  → flush (≤ ROOM_PERSIST_INTERVAL_MS = 5s, single-flight per room)
+      → captureSnapshot(): ONE immutable PersistSnapshot
+        {generation, doc, plainText, wordCount, title, baseRevision}
+        — validateNoteDocument() MUST pass or NOTHING is written
+  → Note.updateOne() ATOMIC + CONDITIONAL:
+        filter: { _id, trashed: { $ne: true },
+                  revision <= snapshot.baseRevision }
+        update: { $set: { content, plainText, wordCount, title,
+                          roomGeneration: snapshot.generation },
+                  $inc: { revision: 1 } }
+  → on success: durableGeneration = generation;
+    persistedRevision = fresh Note.revision (re-read, never assumed)
+  → `persisted` frame {revision, generation} broadcast to the room
+  → client folds revision into the autosave scheduler's baseRevision
+```
+
+### Generation rules (memorize these)
+
+- `roomGeneration` — monotonic, server-authoritative (one `+1` per
+  canonical yjs mutation, one `+1` per SYSTEM restore). Never
+  wall-clock, never client-supplied (identity fields are rejected by
+  the zod frame schemas by construction).
+- `Note.roomGeneration` — the generation that produced the current
+  stored content. Missing on legacy notes (= 0): fully backward
+  compatible, no migration. If the STORED generation is newer than a
+  flush's candidate, the flush ABORTS (the in-memory room lost a race
+  against a later writer; no stale resurrection).
+- A delayed write for generation 17 that completes after generation 18
+  succeeded commits bookkeeping ONLY if
+  `snapshot.generation >= room.durableGeneration` — otherwise it is
+  dropped (and Mongo-side it could not have landed anyway: the
+  conditional filter has moved on).
+- A FAILED write (Mongo outage — injected by tests) leaves
+  `dirtySince` set and writes nothing; the retry RE-CAPTURES a fresh
+  snapshot at the current generation. Failed payloads are never
+  replayed.
+- `flushDirtyRooms` clears the dirty flag ONLY when
+  `durableGeneration >= roomGeneration` — a skipped/aborted flush
+  (conditional miss) stays dirty and is retried.
+
+### REST autosave ⇄ room flush interaction
+
+- The REST PATCH contract (baseRevision/409, maybeCreateVersion) is
+  UNTOUCHED and canonical for client saves.
+- The room flush's conditional update makes the two writers SAFE: if a
+  REST PATCH advanced the note first, the room's write misses its
+  filter (`modifiedCount: 0`), logs a skip, stays dirty, and the next
+  flush re-captures against the new revision. Nobody's content is ever
+  silently overwritten by stale state.
+- Because the room flush `$inc`s `revision`, a client autosave based on
+  the pre-flush revision would 409 — the `persisted` ack frame carries
+  the fresh revision and `EditorPage` seeds it into the scheduler via
+  `collabSession.onPersisted → scheduler.setBaseRevision()`. ONE
+  SaveState machine remains the only save indicator; collab only FEEDS
+  it.
+- `docJsonFromYRoom` prefers a client-submitted `pendingDoc` ONLY while
+  `pendingDocGeneration >= roomGeneration` — a stale client shadow can
+   never mask newer room state, and a quiescent room always flushes its
+   own canonical projection.
+
+### SYSTEM restore (version restore with a live room)
+
+`applySystemRestore` VALIDATES the restored payload first (`§19`); an
+invalid one throws `restore rejected: <reason>` and the restore route
+maps that to HTTP 400 «نسخهٔ انتخابی قابل بازیابی نیست…» — the durable
+pre-restore Note stays the last-known-good. A valid restore replaces
+structure/fragments/floats in ONE transaction, bumps
+`roomGeneration` (invalidating any in-flight older flush) and marks the
+room dirty, so the next flush persists exactly the restored state.
+`lastSavedDoc` is deliberately NOT set by the restore — only a
+successful `persistRoom` may advance the durable mirror (the earlier
+"restore looked idempotent and was never persisted" bug, caught by the
+reliability test, is pinned). Restore still takes the pre-restore
+backup version (`maybeCreateVersion force`) and broadcasts `restored`.
+
+### Corruption defense (§19) — `server/src/collab/validateDoc.ts`
+
+ONE lightweight structural validator used at THREE boundaries — room
+seed (`createRoom`), flush capture (`captureSnapshot`), restore
+(`applySystemRestore`). Detects: non-object/impossible top level,
+`type !== 'doc'`, unserializable/oversized (> 32 MB), content not an
+array, blocks without a type, malformed pageBreak attrs (bad pid
+grammar / unknown kind / non-bool auto), DUPLICATE page ids, invalid
+or duplicate float ids, cyclic or >200k-node trees. It NEVER repairs:
+an invalid snapshot is rejected with a safe reason (no content logged),
+the durable Note is untouched, and the room seeds EMPTY (recoverable).
+`sync.step1` with a malformed state vector no longer throws — it falls
+back to a full-diff reply (the hub's frame loop cannot be killed by a
+bad s64).
+
+### Graceful shutdown (§12)
+
+`SIGTERM`/`SIGINT` → `index.ts` sets a latch, calls
+`shutdownCollabHub()` (idempotent): new joins are refused with close
+code `SERVER_SHUTDOWN = 4011`, frames are dropped, every socket is
+closed with 4011 (clients keep local state + their autosave pending
+queue and reconnect to the restarted server), then
+`flushAllRoomsOnShutdown()` gives every dirty room ONE bounded final
+flush (`SERVER_SHUTDOWN_FLUSH_TIMEOUT_MS = 8s` — a dead Mongo can delay
+exit by at most that), outcomes are logged honestly (persisted/skipped/
+failed/timed-out), awareness maps are destroyed, and only then does
+`disconnectDB()` close Mongo + the dev mongod. A second signal
+force-exits.
+
+### Crash/restart recovery
+
+Rooms are memory-only (unchanged). After a restart the first client
+join re-seeds the room from the newest DURABLE Note — which, thanks to
+the shutdown flush + generation guards, is at most one flush interval
+behind the last converged state and can never be OLDER than what
+clients already saw. Clients replay unsynced local yjs ops through the
+normal state-vector sync; a stale client snapshot cannot overwrite the
+newly seeded room (the doc-frame guard + pendingDocGeneration expiry
++ server-side text-length guard). Known honest limitation: a HARD kill
+(kill -9 / power loss) can still lose up to ROOM_PERSIST_INTERVAL_MS ≈
+5s of room-only state (client REST autosaves are independent and have
+their own 1.5s debounce + offline queue).
+
+### What was NOT changed
+
+MAX_ACTIVE_EDITORS = 4, seat lifecycle, view-only reasons, presence,
+page identity, float tombstones, title metadata boundary, permission
+authority (`resolveCollabAccess` + permissions.ts), the §4 storage
+shape, exports, pagination, the editor hot path (a yjs mutation costs
+one counter increment + one boolean), and the middleware order in
+`index.ts`.
 
 ---
 

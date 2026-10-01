@@ -11,7 +11,7 @@ import {
   Star, HelpCircle, AlertCircle, Lightbulb, Hash, CircleDot, PenTool,
   Columns, Code, AlignRight, AlignCenter, AlignLeft, AlignJustify, Pilcrow,
   List, ListOrdered, ListChecks, CheckCircle, IndentIncrease, IndentDecrease,
-  Paintbrush, Repeat,
+  Paintbrush, Repeat, FileStack,
 } from 'lucide-react';
 import type { MenuItem } from './contextMenu';
 import { h4 } from './icons';
@@ -21,6 +21,8 @@ import { getFloatingSelectionBridge } from './floatingSelectionBridge';
 import { loadImageFile } from '@/utils/imageFile';
 import { openEduBlockStyleModal, openEduQuestionStyleModal } from './contexts/eduBlockStyleModalHost';
 import { getActiveEquation } from '@/editor/equations/bridge';
+import { setTextAlignSmart } from '@/editor/ribbon/ribbonCommands';
+import { applyBulletList, applyOrderedList, applyTaskList } from '@/editor/listCommands';
 import { loadRecentColors, rememberColor } from '@/utils/recentColors';
 import type { SelectableObject } from './types';
 
@@ -52,6 +54,8 @@ export interface CtxMenuActions {
   openReplace: () => void;
   /** add a floating object on the active page (§1: unified shape family) */
   addFloating: (type: import('@/components/editor/FloatingLayer').FloatingElementType) => void;
+  /** کپی صفحهٔ فعال با قاب/استایل/آیتم‌ها (print-pipeline replica → clipboard) */
+  copyActivePage: () => void;
 }
 
 const act = (
@@ -148,12 +152,18 @@ function pasteItem(ed: Editor): MenuItem {
 /** clipboard section — cut/copy/paste against the REAL selection.
  *  A plain labeled group on the menu's normal background (no colored card):
  *  it sits at the very top of every text menu. */
-function clipboardItems(ed: Editor): MenuItem[] {
+function clipboardItems(ed: Editor, a?: CtxMenuActions): MenuItem[] {
   const hasSel = !ed.state.selection.empty;
   return [
     act('sys.cut', 'برش', () => { focusForClipboard(ed); document.execCommand('cut'); }, { icon: h4(Scissors), shortcut: 'Ctrl+X', disabled: !hasSel }),
     act('sys.copy', 'کپی', () => { focusForClipboard(ed); document.execCommand('copy'); }, { icon: h4(Copy), shortcut: 'Ctrl+C', disabled: !hasSel }),
     pasteItem(ed),
+    /* کپی صفحه با استایل و آیتم‌ها — the styled full-sheet copy (قاب + edu
+       styling + floating objects) via the print-pipeline replica; only when
+       the host wired the action (always true in the editor host) */
+    ...(a
+      ? [act('sys.copypage', 'کپی صفحه با استایل و آیتم‌ها', () => a.copyActivePage(), { icon: h4(FileStack) })]
+      : []),
   ];
 }
 
@@ -207,6 +217,8 @@ function insertSectionItems(ed: Editor, a: CtxMenuActions): MenuItem[] {
       act('ins.edu.comparison', 'مقایسه دو ستونه', () => insertBlock({ type: 'comparisonTable', content: [{ type: 'paragraph' }] }), { icon: h4(Columns) }),
       act('ins.edu.procon', 'موافق و مخالف', () => insertBlock({ type: 'proConBlock', attrs: { topic: '' }, content: [{ type: 'paragraph' }] }), { icon: h4(Columns) }),
       act('ins.edu.codeoutput', 'کد با خروجی', () => insertBlock({ type: 'codeOutputBlock', attrs: { lang: '', label: 'کد و خروجی' }, content: [{ type: 'paragraph' }] }), { icon: h4(Code) }),
+      act('ins.edu.matrix', 'مقایسهٔ چندگانه (ماتریس)', () => insertBlock({ type: 'matrixCompareBlock', attrs: { topic: '', colLabels: ['', ''], rowLabels: ['', ''], cells: ['', '', '', ''] }, content: [{ type: 'paragraph' }] }), { icon: h4(Columns) }),
+      act('ins.edu.ordersteps', 'مراحل به‌ترتیب', () => insertBlock({ type: 'orderStepsBlock', attrs: { topic: '', steps: ['', '', ''] }, content: [{ type: 'paragraph' }] }), { icon: h4(ListOrdered) }),
     ] },
     { kind: 'submenu', key: 'ins.question', label: 'افزودن سوال', icon: h4(HelpCircle), items: [
       act('ins.q.short', 'سوال کوتاه', () => insertBlock({ type: 'questionBlock', attrs: { question: '' }, content: [{ type: 'paragraph' }] }), { icon: h4(HelpCircle) }),
@@ -230,14 +242,17 @@ function paragraphSettingsItems(ed: Editor): MenuItem[] {
     act('para.h2', 'عنوان ۲', () => ch().toggleHeading({ level: 2 }).run(), { icon: h4(Type), active: isHeading(2) }),
     act('para.h3', 'عنوان ۳', () => ch().toggleHeading({ level: 3 }).run(), { icon: h4(Type), active: isHeading(3) }),
     sep('para.sep1'),
-    act('para.align.right', 'راست‌چین', () => ch().setTextAlign('right').run(), { icon: h4(AlignRight), active: ed.isActive({ textAlign: 'right' }) }),
-    act('para.align.center', 'وسط‌چین', () => ch().setTextAlign('center').run(), { icon: h4(AlignCenter), active: ed.isActive({ textAlign: 'center' }) }),
-    act('para.align.left', 'چپ‌چین', () => ch().setTextAlign('left').run(), { icon: h4(AlignLeft), active: ed.isActive({ textAlign: 'left' }) }),
-    act('para.align.justify', 'هم‌تراز (justify)', () => ch().setTextAlign('justify').run(), { icon: h4(AlignJustify), active: ed.isActive({ textAlign: 'justify' }) }),
+    /* shared seam with the ribbon هم‌ترازی menu (setTextAlignSmart) — one
+       behavior, two doors: selection → touched blocks only; caret → whole
+       active page box; table → current cell (no whole-box leak) */
+    act('para.align.right', 'راست‌چین', () => setTextAlignSmart(ed, 'right'), { icon: h4(AlignRight), active: ed.isActive({ textAlign: 'right' }) }),
+    act('para.align.center', 'وسط‌چین', () => setTextAlignSmart(ed, 'center'), { icon: h4(AlignCenter), active: ed.isActive({ textAlign: 'center' }) }),
+    act('para.align.left', 'چپ‌چین', () => setTextAlignSmart(ed, 'left'), { icon: h4(AlignLeft), active: ed.isActive({ textAlign: 'left' }) }),
+    act('para.align.justify', 'هم‌تراز (justify)', () => setTextAlignSmart(ed, 'justify'), { icon: h4(AlignJustify), active: ed.isActive({ textAlign: 'justify' }) }),
     sep('para.sep2'),
-    act('para.list.bullet', 'فهرست نقطه‌ای', () => ch().toggleBulletList().run(), { icon: h4(List), active: ed.isActive('bulletList') }),
-    act('para.list.ordered', 'فهرست شماره‌دار', () => ch().toggleOrderedList().run(), { icon: h4(ListOrdered), active: ed.isActive('orderedList') }),
-    act('para.list.task', 'چک‌لیست', () => ch().toggleTaskList().run(), { icon: h4(ListChecks), active: ed.isActive('taskList') }),
+    act('para.list.bullet', 'فهرست نقطه‌ای', () => applyBulletList(ed), { icon: h4(List), active: ed.isActive('bulletList') }),
+    act('para.list.ordered', 'فهرست شماره‌دار', () => applyOrderedList(ed), { icon: h4(ListOrdered), active: ed.isActive('orderedList') }),
+    act('para.list.task', 'چک‌لیست', () => applyTaskList(ed), { icon: h4(ListChecks), active: ed.isActive('taskList') }),
     /* list marker glyph — change/remove AFTER creation (ListMarker ext) */
     ...listMarkerMenuItems(ed),
     sep('para.sep3'),
@@ -259,7 +274,7 @@ function paragraphSettingsItems(ed: Editor): MenuItem[] {
 /** NORMAL TEXT — caret only (no selection: cut/copy disabled, note hidden) */
 function normalTextMenu(ed: Editor, a: CtxMenuActions): MenuItem[] {
   return [
-    ...clipboardItems(ed),
+    ...clipboardItems(ed, a),
     sep('nt.sep1'),
     ...insertSectionItems(ed, a),
     sep('nt.sep2'),
@@ -278,7 +293,7 @@ function normalTextMenu(ed: Editor, a: CtxMenuActions): MenuItem[] {
 /** SELECTED TEXT — same hierarchy; the note action joins پیوند in its group */
 function selectedTextMenu(ed: Editor, a: CtxMenuActions): MenuItem[] {
   return [
-    ...clipboardItems(ed),
+    ...clipboardItems(ed, a),
     sep('st.sep1'),
     ...insertSectionItems(ed, a),
     sep('st.sep2'),
@@ -658,6 +673,7 @@ export function buildContextMenuItems(
     case 'equation': case 'equationInline': return equationMenu(editor);
     case 'calloutBlock': case 'questionBlock': case 'exampleBlock': case 'keyTermBlock':
     case 'longAnswerBlock': case 'footnoteBlock': case 'highlightBox': case 'referenceBlock':
+    case 'matrixCompareBlock': case 'orderStepsBlock':
       return [...eduBlockMenu(editor), ...(editor.state.selection.empty
         ? normalTextMenu(editor, actions)
         : selectedTextMenu(editor, actions))];

@@ -53,6 +53,7 @@ const EDU_ICON_IDS: Record<string, string> = {
   question: 'chat-circle-text', example: 'flask', keyterm: 'bookmark-simple',
   codeoutput: 'monitor',
   quizessay: 'pencil-simple', truefalse: 'check-circle', mcq: 'mcq',
+  matrix: 'math-operations', steps: 'hourglass',
 };
 
 /** four-bullet list icon (phosphor style, currentColor) — the four-option
@@ -278,6 +279,70 @@ function editableTitleView(spec: EditableTitleSpec) {
     const titleObserver = new MutationObserver(() => sync());
     titleObserver.observe(text, { characterData: true, childList: true, subtree: true });
     text.addEventListener('blur', sync);
+    /* DOUBLE-CLICK WORD SELECTION (user report: «cursor هم نشون داده نمی‌شه
+       وقتی دوبار کلیک می‌کنی روش»): Chromium's native dblclick word-select
+       starts the range at the WORD START and extends to the PREVIOUS
+       SIBLING BOUNDARY whenever the clicked word sits at the START of the
+       span (RTL titles: the first word is on the RIGHT = near the icon) —
+       producing text→element ranges that render as NOTHING (empty
+       toString, invisible highlight) even though offsets exist. Stop the
+       dblclick, then perform the same selection OURSELVES, anchored
+       INSIDE the text node: double-click = word under the caret, triple =
+       whole span. PM never sees the event (stopEvent already returns true
+       for title targets), so this cannot fight the editor's own
+       selection sync. */
+    text.addEventListener('dblclick', (e: MouseEvent) => {
+      const sel = window.getSelection();
+      if (!sel) return;
+      const tn = text.firstChild instanceof Text ? text.firstChild : null;
+      if (!tn || tn.length === 0) return; // empty span: let the ::before placeholder show
+      e.preventDefault();
+      e.stopPropagation();
+      let from = 0, to = tn.length;
+      if (e.detail >= 3) {
+        /* triple-click → whole span */
+      } else {
+        /* word around the click X (RTL/LTR agnostic: walk chars by rect) */
+        const range = document.createRange();
+        const probe = (off: number) => {
+          try {
+            range.setStart(tn, Math.max(0, Math.min(off, tn.length)));
+            range.collapse(true);
+            return range.getBoundingClientRect();
+          } catch { return null; }
+        };
+        /* find the char offset nearest the pointer */
+        let best = 0, bestDist = Infinity;
+        for (let off = 0; off <= tn.length; off++) {
+          const r = probe(off);
+          if (!r || (r.width === 0 && r.height === 0)) continue;
+          const d = Math.abs((r.left + r.width / 2) - e.clientX);
+          if (d < bestDist) { bestDist = d; best = off; }
+        }
+        /* expand to word boundaries using the editor's locale-aware split
+           (Intl.Segmenter word granularity, fallback: whitespace) */
+        let wStart = 0, wEnd = tn.length;
+        try {
+          const seg = new Intl.Segmenter(undefined, { granularity: 'word' });
+          for (const s of seg.segment(tn.data)) {
+            if (s.index <= best && best <= s.index + s.segment.length) { wStart = s.index; wEnd = s.index + s.segment.length; break; }
+          }
+        } catch {
+          const ws = /\s/;
+          wStart = tn.data.lastIndexOf(' ', Math.max(0, best - 1)) + 1;
+          const nxt = tn.data.indexOf(' ', best);
+          wEnd = nxt === -1 ? tn.length : nxt;
+        }
+        from = wStart; to = wEnd;
+      }
+      try {
+        const r2 = document.createRange();
+        r2.setStart(tn, from);
+        r2.setEnd(tn, to);
+        sel.removeAllRanges();
+        sel.addRange(r2);
+      } catch { /* best effort */ }
+    });
     text.addEventListener('paste', (e: ClipboardEvent) => {
       e.preventDefault();
       const t = e.clipboardData?.getData('text/plain') ?? '';
@@ -1330,7 +1395,13 @@ export const LongAnswerBlock = Node.create({
   content: 'block*',
   defining: true,
   addAttributes() {
-    return { question: { default: '' }, ...quizAttrs(), ...styleAttrs() };
+    /* answerText MUST be declared — it carries the end-of-block answer line
+       (answerAt='end'). Without the attr in the schema, setNodeMarkup and
+       JSON→node round-trips silently DROP it, so «روی سوال تشریحی چیزی که
+       نوشتی تو خروجی رندر نمی‌شود»: the answer line existed in the policy
+       but the policy's data source kept vanishing. Same attr set as
+       questionBlock above. */
+    return { question: { default: '' }, answerText: { default: '' }, ...quizAttrs(), ...styleAttrs() };
   },
   parseHTML() {
     return [{ tag: 'div[data-type="longanswer"]' }];
@@ -1594,6 +1665,339 @@ export const CodeOutputBlock = Node.create({
         legacy.className = 'edu-codeoutput-legacy';
         wrapper.appendChild(legacy);
         return legacy;
+      },
+    });
+  },
+});
+
+/* ═══════════════════════════════════════════════════════════════════════
+   MULTI-COMPARE MATRIX — مقایسهٔ چندگانه (کاربر: «کادرای آموزشی با ویژگی
+   عای بیشتر… مثلا مقایسه بین چندتا چیز»). N چیز در برابر هم، با سطرهای
+   ویژگی: ستون‌ها و سطرها در attrs می‌مانند (persist + export ساده، مثل
+   proCon/mcq) و بدنه یک contentDOM واقعی برای متن آزاد زیر ماتریس است.
+
+   ساختار attrs:
+     colLabels : string[]  — نام چیزها (۲ تا ۴ ستون)
+     rowLabels : string[]  — نام ویژگی‌ها (سطرها)
+     cells     : string[]  — مقدار هر خانه به‌ترتیب سطر-major
+   ═════════════════════════════════════════════════════════════════════ */
+export interface MatrixData {
+  colLabels: string[];
+  rowLabels: string[];
+  cells: string[];
+}
+
+/** read + normalize the matrix attrs (defensive: older/сorrupt docs) */
+export function matrixDataOf(node: { attrs: Record<string, unknown> }): MatrixData {
+  const a = node.attrs;
+  const cols = Math.min(Math.max(Array.isArray(a.colLabels) ? a.colLabels.length : 2, 2), 4);
+  const rows = Math.min(Math.max(Array.isArray(a.rowLabels) ? a.rowLabels.length : 2, 1), 12);
+  const strArr = (v: unknown, n: number, fill: string) =>
+    Array.from({ length: n }, (_, i) => (Array.isArray(v) && typeof v[i] === 'string' ? v[i] : fill));
+  const colLabels = strArr(a.colLabels, cols, '');
+  const rowLabels = strArr(a.rowLabels, rows, '');
+  const cells = strArr(a.cells, cols * rows, '');
+  return { colLabels, rowLabels, cells };
+}
+
+/** cell index (row-major) */
+function cellAt(d: MatrixData, r: number, c: number): number { return r * d.colLabels.length + c; }
+
+export const MatrixCompareBlock = Node.create({
+  name: 'matrixCompareBlock',
+  group: 'block',
+  content: 'block*',
+  defining: true,
+  addAttributes() {
+    return {
+      topic: { default: '' },
+      colLabels: { default: ['', ''] },
+      rowLabels: { default: ['', ''] },
+      cells: { default: ['', '', '', ''] },
+      ...styleAttrs(),
+    };
+  },
+  parseHTML() {
+    return [{ tag: 'div[data-type="matrixcompare"]' }];
+  },
+  renderHTML({ node }) {
+    normalizeLegacyStyleAttrs(node);
+    const d = matrixDataOf(node);
+    return [
+      'div',
+      mergeAttributes(wrapperAttrs(node, { 'data-type': 'matrixcompare', class: 'edu-block edu-matrix' })),
+      ['div', { class: 'edu-title' }, ...titleChildren('matrix', node.attrs.topic, 'مقایسهٔ چندگانه', node.attrs.styleTitle as string)],
+      ['table', { class: 'cmp-matrix' },
+        ['tr', { class: 'cmp-matrix-head' },
+          ['th', { class: 'cmp-matrix-corner' }, ''],
+          ...d.colLabels.map((c) => ['th', { class: 'cmp-matrix-col' }, c])],
+        ...d.rowLabels.map((rl, r) =>
+          ['tr', {},
+            ['td', { class: 'cmp-matrix-rowlabel' }, rl],
+            ...d.colLabels.map((_, c) => ['td', { class: 'cmp-matrix-cell' }, d.cells[cellAt(d, r, c)]])]),
+      ],
+      ['div', 0],
+    ];
+  },
+  addNodeView() {
+    return editableTitleView({
+      name: 'matrixCompareBlock', attr: 'topic', dataType: 'matrixcompare',
+      blockCls: 'edu-block edu-matrix', iconKey: 'matrix', fallback: 'مقایسهٔ چندگانه',
+      buildBody: (node, wrapper, editor, getPos, els) => {
+        const table = document.createElement('table');
+        table.className = 'cmp-matrix';
+        els.matrixTable = table;
+        const build = (nd: any) => {
+          const d = matrixDataOf(nd);
+          table.innerHTML = '';
+          const thead = document.createElement('tr');
+          thead.className = 'cmp-matrix-head';
+          const corner = document.createElement('th');
+          corner.className = 'cmp-matrix-corner';
+          thead.appendChild(corner);
+          /* ستون‌ها: نام چیزها — قابل ویرایش (Enter = ستون جدید تا ۴) */
+          d.colLabels.forEach((label, ci) => {
+            const th = document.createElement('th');
+            th.className = 'cmp-matrix-col';
+            const span = document.createElement('span');
+            span.className = 'cmp-matrix-coltext';
+            span.setAttribute('data-ph', 'چیز ' + (ci + 1));
+            try { span.contentEditable = 'plaintext-only'; } catch { span.contentEditable = 'true'; }
+            span.textContent = label;
+            const syncLabel = () => {
+              const pos = typeof getPos === 'function' ? getPos() : null;
+              if (pos == null) return;
+              const cur = editor.state.doc.nodeAt(pos);
+              if (!cur) return;
+              const dd = matrixDataOf(cur);
+              if (dd.colLabels[ci] === (span.textContent ?? '')) return;
+              const next = [...dd.colLabels];
+              next[ci] = span.textContent ?? '';
+              editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, colLabels: next }));
+            };
+            new MutationObserver(syncLabel).observe(span, { characterData: true, childList: true, subtree: true });
+            span.addEventListener('blur', syncLabel);
+            span.addEventListener('keydown', (ev: KeyboardEvent) => {
+              if (ev.key === 'Enter') {
+                ev.preventDefault();
+                const pos = typeof getPos === 'function' ? getPos() : null;
+                if (pos == null) return;
+                const cur = editor.state.doc.nodeAt(pos);
+                if (!cur) return;
+                const dd = matrixDataOf(cur);
+                if (dd.colLabels.length >= 4) return;
+                editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, {
+                  ...cur.attrs,
+                  colLabels: [...dd.colLabels, ''],
+                  cells: dd.rowLabels.flatMap(() => Array.from({ length: dd.colLabels.length + 1 }, (_, k) => dd.cells[k] ?? '')),
+                }));
+              }
+            });
+            th.appendChild(span);
+            thead.appendChild(th);
+          });
+          table.appendChild(thead);
+          /* سطرها: ویژگی + سلول‌ها — همه قابل ویرایش، همه در attrs */
+          d.rowLabels.forEach((rl, ri) => {
+            const tr = document.createElement('tr');
+            const lab = document.createElement('td');
+            lab.className = 'cmp-matrix-rowlabel';
+            const labSpan = document.createElement('span');
+            labSpan.className = 'cmp-matrix-labtext';
+            labSpan.setAttribute('data-ph', 'ویژگی…');
+            try { labSpan.contentEditable = 'plaintext-only'; } catch { labSpan.contentEditable = 'true'; }
+            labSpan.textContent = rl;
+            new MutationObserver(() => {
+              const pos = typeof getPos === 'function' ? getPos() : null;
+              if (pos == null) return;
+              const cur = editor.state.doc.nodeAt(pos);
+              if (!cur) return;
+              const dd = matrixDataOf(cur);
+              if (dd.rowLabels[ri] === (labSpan.textContent ?? '')) return;
+              const next = [...dd.rowLabels];
+              next[ri] = labSpan.textContent ?? '';
+              editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, rowLabels: next }));
+            }).observe(labSpan, { characterData: true, childList: true, subtree: true });
+            labSpan.addEventListener('blur', () => {
+              const pos = typeof getPos === 'function' ? getPos() : null;
+              if (pos == null) return;
+              const cur = editor.state.doc.nodeAt(pos);
+              if (!cur) return;
+              const dd = matrixDataOf(cur);
+              if (dd.rowLabels[ri] === (labSpan.textContent ?? '')) return;
+              const next = [...dd.rowLabels];
+              next[ri] = labSpan.textContent ?? '';
+              editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, rowLabels: next }));
+            });
+            lab.appendChild(labSpan);
+            tr.appendChild(lab);
+            d.colLabels.forEach((_, ci) => {
+              const td = document.createElement('td');
+              td.className = 'cmp-matrix-cell';
+              const span = document.createElement('span');
+              span.className = 'cmp-matrix-celltext';
+              span.setAttribute('data-ph', '…');
+              try { span.contentEditable = 'plaintext-only'; } catch { span.contentEditable = 'true'; }
+              span.textContent = d.cells[cellAt(d, ri, ci)];
+              const syncCell = () => {
+                const pos = typeof getPos === 'function' ? getPos() : null;
+                if (pos == null) return;
+                const cur = editor.state.doc.nodeAt(pos);
+                if (!cur) return;
+                const dd = matrixDataOf(cur);
+                const v = span.textContent ?? '';
+                if (dd.cells[cellAt(dd, ri, ci)] === v) return;
+                const next = [...dd.cells];
+                next[cellAt(dd, ri, ci)] = v;
+                editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, cells: next }));
+              };
+              new MutationObserver(syncCell).observe(span, { characterData: true, childList: true, subtree: true });
+              span.addEventListener('blur', syncCell);
+              td.appendChild(span);
+              tr.appendChild(td);
+            });
+            table.appendChild(tr);
+          });
+        };
+        build(node);
+        /* expose the rebuild closure to onUpdate (different callback scope —
+           a direct build(updated) there is a ReferenceError) */
+        (els as unknown as Record<string, unknown>).matrixBuild = (nd: unknown) => build(nd);
+        wrapper.appendChild(table);
+        /* row add — a small hint row under the table (clickable, not PM content) */
+        const addRow = document.createElement('button');
+        els.matrixAddRow = addRow;
+        addRow.type = 'button';
+        addRow.className = 'cmp-matrix-addrow';
+        addRow.setAttribute('contenteditable', 'false');
+        addRow.textContent = '+ افزودن ویژگی';
+        addRow.addEventListener('click', () => {
+          const pos = typeof getPos === 'function' ? getPos() : null;
+          if (pos == null) return;
+          const cur = editor.state.doc.nodeAt(pos);
+          if (!cur) return;
+          const dd = matrixDataOf(cur);
+          if (dd.rowLabels.length >= 12) return;
+          editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, {
+            ...cur.attrs,
+            rowLabels: [...dd.rowLabels, ''],
+            cells: [...dd.cells, ...dd.colLabels.map(() => '')],
+          }));
+        });
+        wrapper.appendChild(addRow);
+        /* free text under the matrix = the REAL PM contentDOM */
+        return appendBody(wrapper);
+      },
+      /* attrs-driven rebuild: column/row/cell counts CHANGE via setNodeMarkup
+         (Enter on a header adds a «چیز» column, +افزودن ویژگی adds a row) —
+         the table DOM must be rebuilt from the new attrs or the block shows
+         the stale shape forever (the «ستون جدید ظاهر نمیشه» bug). The
+         rebuild goes through build(updated) — the SAME observer-harnessed
+         path as create time — so every recreated span keeps its
+         characterData MutationObserver and stays editable/synced (a bare
+         innerHTML rebuild would produce dead spans whose edits never reach
+         attrs). Only REBUILDS on count changes: text-only edits keep the
+         spans (a rebuild would kill the caret). */
+      onUpdate: (updated, els) => {
+        const table = els.matrixTable as HTMLTableElement | undefined;
+        if (!table) return;
+        const d = matrixDataOf(updated);
+        const cols = table.querySelectorAll('.cmp-matrix-col').length;
+        const rows = table.querySelectorAll('.cmp-matrix-rowlabel').length;
+        if (cols === d.colLabels.length && rows === d.rowLabels.length) return;
+        const rebuild = (els as Record<string, unknown>).matrixBuild as ((nd: unknown) => void) | undefined;
+        if (!rebuild) return;
+        table.innerHTML = '';
+        rebuild(updated);
+      },
+    });
+  },
+});
+
+/** ORDERED STEPS — مراحل به‌ترتیب (شماره‌دار): steps live in attrs so they
+ *  persist + export exactly like pro/con; each step is one editable line. */
+export const OrderStepsBlock = Node.create({
+  name: 'orderStepsBlock',
+  group: 'block',
+  content: 'block*',
+  defining: true,
+  addAttributes() {
+    return {
+      topic: { default: '' },
+      steps: { default: ['', '', ''] },
+      ...styleAttrs(),
+    };
+  },
+  parseHTML() {
+    return [{ tag: 'div[data-type="ordersteps"]' }];
+  },
+  renderHTML({ node }) {
+    normalizeLegacyStyleAttrs(node);
+    const steps = Array.isArray(node.attrs.steps) ? (node.attrs.steps as string[]) : ['', '', ''];
+    return [
+      'div',
+      mergeAttributes(wrapperAttrs(node, { 'data-type': 'ordersteps', class: 'edu-block edu-steps' })),
+      ['div', { class: 'edu-title' }, ...titleChildren('steps', node.attrs.topic, 'مراحل', node.attrs.styleTitle as string)],
+      ['ol', { class: 'edu-steps-list' },
+        ...steps.map((s) => ['li', { class: 'edu-steps-item' }, ['span', { class: 'edu-steps-text' }, s]])],
+      ['div', 0],
+    ];
+  },
+  addNodeView() {
+    return editableTitleView({
+      name: 'orderStepsBlock', attr: 'topic', dataType: 'ordersteps',
+      blockCls: 'edu-block edu-steps', iconKey: 'steps', fallback: 'مراحل',
+      buildBody: (node, wrapper, editor, getPos) => {
+        const list = document.createElement('ol');
+        list.className = 'edu-steps-list';
+        const build = (nd: any) => {
+          const steps = Array.isArray(nd.attrs.steps) ? (nd.attrs.steps as string[]) : ['', '', ''];
+          list.innerHTML = '';
+          steps.forEach((s, i) => {
+            const li = document.createElement('li');
+            li.className = 'edu-steps-item';
+            const num = document.createElement('span');
+            num.className = 'edu-steps-num';
+            num.setAttribute('contenteditable', 'false');
+            num.textContent = String(i + 1);
+            const span = document.createElement('span');
+            span.className = 'edu-steps-text';
+            span.setAttribute('data-ph', 'مرحله ' + (i + 1) + '…');
+            try { span.contentEditable = 'plaintext-only'; } catch { span.contentEditable = 'true'; }
+            span.textContent = s;
+            const sync = () => {
+              const pos = typeof getPos === 'function' ? getPos() : null;
+              if (pos == null) return;
+              const cur = editor.state.doc.nodeAt(pos);
+              if (!cur) return;
+              const arr = Array.isArray(cur.attrs.steps) ? [...(cur.attrs.steps as string[])] : [];
+              if (arr[i] === (span.textContent ?? '')) return;
+              while (arr.length < steps.length) arr.push('');
+              arr[i] = span.textContent ?? '';
+              editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, steps: arr }));
+            };
+            new MutationObserver(sync).observe(span, { characterData: true, childList: true, subtree: true });
+            span.addEventListener('blur', sync);
+            span.addEventListener('keydown', (ev: KeyboardEvent) => {
+              if (ev.key === 'Enter') {
+                ev.preventDefault();
+                const pos = typeof getPos === 'function' ? getPos() : null;
+                if (pos == null) return;
+                const cur = editor.state.doc.nodeAt(pos);
+                if (!cur) return;
+                const arr = Array.isArray(cur.attrs.steps) ? [...(cur.attrs.steps as string[])] : [];
+                if (arr.length >= 10) return;
+                arr.splice(i + 1, 0, '');
+                editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, steps: arr }));
+              }
+            });
+            li.append(num, span);
+            list.appendChild(li);
+          });
+        };
+        build(node);
+        wrapper.appendChild(list);
+        return appendBody(wrapper);
       },
     });
   },

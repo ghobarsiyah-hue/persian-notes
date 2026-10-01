@@ -333,7 +333,13 @@
    table node view from the doc's width attr (which also survives
    save/load and matches getHTML for exports). */
 .ProseMirror table {
-  border-collapse: collapse;
+  /* separate + zero spacing (instead of collapse): collapse makes browsers
+     IGNORE cell border-radius, so outer corners could never round. Each
+     cell now draws only its inline-end (left in RTL) + bottom edge; the
+     first column/row carry the outer edges — no doubled borders, and the
+     four outer cells can take real corner radii. */
+  border-collapse: separate;
+  border-spacing: 0;
   table-layout: fixed;
   width: var(--pn-table-w, 100%);
   min-width: 120px;
@@ -353,8 +359,12 @@
 }
 .ProseMirror table td,
 .ProseMirror table th {
-  /* رنگ گرید — بنفش ملایم سیستم (قابل تغییر با data-grid از تب جدول) */
-  border: 1px solid #b9a7e0;
+  /* رنگ گرید — بنفش ملایم سیستم (قابل تغییر با data-grid از تب جدول);
+     per-side borders (separate-collapse) — color flows from border-color */
+  border-top: none;
+  border-inline-start: none;
+  border-inline-end: 1px solid var(--pn-grid, #c8bce8);
+  border-bottom: 1px solid var(--pn-grid, #c8bce8);
   padding: 8px 12px;
   vertical-align: top;
   position: relative;
@@ -366,9 +376,9 @@
    grid color on every preset table). data-tstyle + data-grid → the grid
    color wins; a tstyle may only supply the color when gridColor is unset. */
 .ProseMirror table[data-grid] td,
-.ProseMirror table[data-grid] th { border-color: var(--pn-grid, #b9a7e0); }
+.ProseMirror table[data-grid] th { border-color: var(--pn-grid, #c8bce8); }
 .ProseMirror table[data-tstyle][data-grid] td,
-.ProseMirror table[data-tstyle][data-grid] th { border-color: var(--pn-grid, #b9a7e0); }
+.ProseMirror table[data-tstyle][data-grid] th { border-color: var(--pn-grid, #c8bce8); }
 .ProseMirror table[data-tstyle][data-grid='none'] td,
 .ProseMirror table[data-tstyle][data-grid='none'] th { border-color: transparent; }
 .ProseMirror table[data-grid='none'] td,
@@ -381,8 +391,35 @@
 .dark .ProseMirror table[data-grid] th { border-color: var(--pn-grid, rgba(167, 139, 250, 0.45)); }
 .dark .ProseMirror table[data-grid='none'] td,
 .dark .ProseMirror table[data-grid='none'] th { border-color: transparent; }
+/* ── outer edges + rounded outer cells ──
+   The first column carries the START (right, RTL) outer edge and the first
+   row the TOP edge; the four outer cells take the corner radii (logical,
+   RTL-aware). Full-grid presets (navy/soft) opt back in explicitly;
+   self-drawn templates (minimal/academic/bold/plain) revert to collapse
+   below and manage their own outer lines. */
+.ProseMirror table:not([data-tstyle]) td:first-child,
+.ProseMirror table:not([data-tstyle]) th:first-child,
+.ProseMirror table[data-tstyle='navy'] td:first-child,
+.ProseMirror table[data-tstyle='navy'] th:first-child,
+.ProseMirror table[data-tstyle='soft'] td:first-child,
+.ProseMirror table[data-tstyle='soft'] th:first-child { border-inline-start: 1px solid var(--pn-grid, #c8bce8); }
+.ProseMirror table:not([data-tstyle]) tr:first-child td,
+.ProseMirror table:not([data-tstyle]) tr:first-child th,
+.ProseMirror table[data-tstyle='navy'] tr:first-child td,
+.ProseMirror table[data-tstyle='navy'] tr:first-child th,
+.ProseMirror table[data-tstyle='soft'] tr:first-child td,
+.ProseMirror table[data-tstyle='soft'] tr:first-child th { border-top: 1px solid var(--pn-grid, #c8bce8); }
+.ProseMirror table tr:first-child td:first-child,
+.ProseMirror table tr:first-child th:first-child { border-start-start-radius: 8px; }
+.ProseMirror table tr:first-child td:last-child,
+.ProseMirror table tr:first-child th:last-child { border-start-end-radius: 8px; }
+.ProseMirror table tr:last-child td:first-child,
+.ProseMirror table tr:last-child th:first-child { border-end-start-radius: 8px; }
+.ProseMirror table tr:last-child td:last-child,
+.ProseMirror table tr:last-child th:last-child { border-end-end-radius: 8px; }
 .ProseMirror table th {
-  background: #fafafa;
+  /* سر ستون — خاکستری سابق → بنفش کم‌رنگ سیستم (ملایم‌تر) */
+  background: #f2ecfb;
   color: #171717;
   font-weight: 600;
   font-size: 0.9em;
@@ -413,7 +450,14 @@
 
 /* ── table style templates (قالب‌های آماده) — data-tstyle tokens ──
    The SAME token rules exist in printCss (PDF) and are baked inline by the
-   Word exporter, so a preset look is identical in editor, PDF and Word. */
+   Word exporter, so a preset look is identical in editor, PDF and Word.
+   Self-drawn templates revert to COLLAPSE: they manage their own outer
+   lines (minimal's hairline bottoms, academic's 2px rules, bold's frame)
+   and collapse keeps that look pixel-identical to before. */
+.ProseMirror table[data-tstyle='minimal'],
+.ProseMirror table[data-tstyle='academic'],
+.ProseMirror table[data-tstyle='bold'],
+.ProseMirror table[data-tstyle='plain'] { border-collapse: collapse; }
 .ProseMirror table[data-tstyle='navy'] th { background: #1e3a5f; color: #ffffff; }
 .ProseMirror table[data-tstyle='soft'] td,
 .ProseMirror table[data-tstyle='soft'] th { border-color: #d8dee6; }
@@ -617,6 +661,11 @@
 .edu-title-icon { display: inline-flex; align-items: center; opacity: 0.85; }
 .edu-title-icon svg { display: block; }
 .edu-title-text { flex: 1; min-width: 2em; outline: none; border-radius: 4px; }
+.edu-title-text { caret-color: currentColor; }
+.edu-title-text::selection, .edu-title-text *::selection {
+  background: rgba(0, 112, 243, 0.30);
+  color: inherit;             /* keep the family title color visible under the selection paint */
+}
 .edu-title-text:focus { box-shadow: 0 0 0 2px rgba(0, 112, 243, 0.25); }
 .edu-title-text:empty::before { content: attr(data-ph); opacity: 0.4; }
 .edu-title-suffix { opacity: 0.6; font-weight: 500; font-size: 0.85em; white-space: nowrap; }
@@ -1142,9 +1191,13 @@
 .edu-tinted .edu-comparison { background: rgba(121, 40, 202, 0.04); }
 .edu-tinted .edu-timeline { background: rgba(0, 112, 243, 0.04); }
 .edu-tinted .edu-footnote { background: rgba(31, 115, 150, 0.04); }
-.edu-tinted .edu-longanswer { background: rgba(245, 166, 35, 0.05); }
-.edu-tinted .edu-truefalse { background: rgba(31, 115, 150, 0.05); }
-.edu-tinted .edu-mcq { background: rgba(121, 40, 202, 0.04); }
+/* v7 «کنتراست» dark plate must WIN over the tinted wash: same specificity,
+   but the tinted rules come later in the file — so v7 needs a stronger
+   selector, otherwise a tinted document paints the light family tint OVER
+   the dark plate while the v7 white text survives → unreadable block. */
+.edu-tinted .edu-longanswer:not([data-qv="v7"]):not([data-qv="v6"]) { background: rgba(245, 166, 35, 0.05); }
+.edu-tinted .edu-truefalse:not([data-qv="v7"]):not([data-qv="v6"]) { background: rgba(31, 115, 150, 0.05); }
+.edu-tinted .edu-mcq:not([data-qv="v7"]):not([data-qv="v6"]) { background: rgba(121, 40, 202, 0.04); }
 .dark .edu-tinted .edu-definition { background: rgba(0, 112, 243, 0.08); }
 .dark .edu-tinted .edu-important { background: rgba(245, 166, 35, 0.08); }
 .dark .edu-tinted .edu-exam { background: rgba(31, 115, 150, 0.08); }
@@ -1161,9 +1214,9 @@
 .dark .edu-tinted .edu-comparison { background: rgba(121, 40, 202, 0.06); }
 .dark .edu-tinted .edu-timeline { background: rgba(0, 112, 243, 0.06); }
 .dark .edu-tinted .edu-footnote { background: rgba(31, 115, 150, 0.06); }
-.dark .edu-tinted .edu-longanswer { background: rgba(245, 166, 35, 0.06); }
-.dark .edu-tinted .edu-truefalse { background: rgba(31, 115, 150, 0.07); }
-.dark .edu-tinted .edu-mcq { background: rgba(121, 40, 202, 0.06); }
+.dark .edu-tinted .edu-longanswer:not([data-qv="v7"]):not([data-qv="v6"]) { background: rgba(245, 166, 35, 0.06); }
+.dark .edu-tinted .edu-truefalse:not([data-qv="v7"]):not([data-qv="v6"]) { background: rgba(31, 115, 150, 0.07); }
+.dark .edu-tinted .edu-mcq:not([data-qv="v7"]):not([data-qv="v6"]) { background: rgba(121, 40, 202, 0.06); }
 
 /* Comparison */
 .cmp-head {
@@ -1190,6 +1243,81 @@
 .dark .cmp-row-label { background: rgba(255, 255, 255, 0.03); color: #999; }
 .cmp-row-cell { color: #333; }
 .dark .cmp-row-cell { color: #ccc; }
+
+/* ── MatrixCompare — مقایسهٔ چندگانه (N چیز × ویژگی‌ها) ───────────── */
+.edu-matrix .edu-title { color: #0070f3; }
+.dark .edu-matrix .edu-title { color: #3291ff; }
+.edu-tinted .edu-matrix { background: rgba(0, 112, 243, 0.04); }
+.dark .edu-tinted .edu-matrix { background: rgba(0, 112, 243, 0.06); }
+.cmp-matrix { width: 100%; border-collapse: collapse; table-layout: fixed; margin: 6px 0; }
+.cmp-matrix-head th {
+  background: rgba(0, 112, 243, 0.07);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  padding: 6px 8px;
+  font-size: 0.85em;
+  font-weight: 600;
+  color: #0070f3;
+  text-align: center;
+}
+.dark .cmp-matrix-head th { background: rgba(0, 112, 243, 0.12); border-color: rgba(255, 255, 255, 0.06); color: #3291ff; }
+.cmp-matrix-corner { width: 28%; }
+.cmp-matrix-coltext, .cmp-matrix-labtext, .cmp-matrix-celltext { outline: none; min-width: 1em; display: block; }
+.cmp-matrix-coltext:empty::before, .cmp-matrix-labtext:empty::before, .cmp-matrix-celltext:empty::before { content: attr(data-ph); opacity: 0.4; }
+.cmp-matrix-rowlabel {
+  background: rgba(0, 0, 0, 0.02);
+  font-weight: 600;
+  color: #444;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  padding: 6px 8px;
+  font-size: 0.85em;
+}
+.dark .cmp-matrix-rowlabel { background: rgba(255, 255, 255, 0.03); color: #bbb; border-color: rgba(255, 255, 255, 0.06); }
+.cmp-matrix-cell {
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  padding: 6px 8px;
+  font-size: 0.85em;
+  color: #333;
+  vertical-align: top;
+}
+.dark .cmp-matrix-cell { border-color: rgba(255, 255, 255, 0.06); color: #ccc; }
+.cmp-matrix-addrow {
+  border: 1px dashed rgba(0, 112, 243, 0.35);
+  background: transparent;
+  color: #0070f3;
+  font-size: 0.78em;
+  padding: 3px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-top: 4px;
+  font-family: inherit;
+}
+.cmp-matrix-addrow:hover { background: rgba(0, 112, 243, 0.06); }
+.dark .cmp-matrix-addrow { color: #3291ff; border-color: rgba(50, 145, 255, 0.4); }
+
+/* ── OrderSteps — مراحل به‌ترتیب ─────────────────────────────────── */
+.edu-steps .edu-title { color: #0a7d4f; }
+.dark .edu-steps .edu-title { color: #34d399; }
+.edu-tinted .edu-steps { background: rgba(10, 125, 79, 0.04); }
+.dark .edu-tinted .edu-steps { background: rgba(10, 125, 79, 0.06); }
+.edu-steps-list { list-style: none; margin: 6px 0; padding: 0; counter-reset: pnstep; }
+.edu-steps-item { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; }
+.edu-steps-num {
+  flex: none;
+  width: 1.5em;
+  height: 1.5em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(10, 125, 79, 0.1);
+  color: #0a7d4f;
+  font-weight: 700;
+  font-size: 0.78em;
+  transform: translateY(2px);
+}
+.dark .edu-steps-num { background: rgba(52, 211, 153, 0.15); color: #34d399; }
+.edu-steps-text { flex: 1; outline: none; min-width: 2em; }
+.edu-steps-text:empty::before { content: attr(data-ph); opacity: 0.4; }
 
 /* Timeline */
 .edu-timeline .edu-title { color: #0070f3; box-shadow: inset 0 -1px 0 0 rgba(0, 112, 243, 0.1); padding-bottom: 6px; margin-bottom: 8px; }
@@ -1488,10 +1616,10 @@
    page-chrome SVG layer (page-border, same layer as the framed sheet's
    ornamental frame) — the padding below is the writing-safe margin that
    keeps content and objects inside the frame. Values DERIVED from
-   pageCapacity.BOOKLET_PADDING (34/38/34/34) — keep in sync with that one
+   pageCapacity.BOOKLET_PADDING (34/30/34/34) — keep in sync with that one
    contract. */
 .page-booklet {
-  padding: 34px 38px 34px 34px;
+  padding: 34px 30px 34px 34px;
 }
 
 /* ── Notebook page (صفحه نوت‌بوکی، خط‌دار) ─────────────────────────
@@ -1969,6 +2097,36 @@ html { scrollbar-width: thin; scrollbar-color: rgba(0, 0, 0, 0.12) transparent; 
   font-size: 12px;
   line-height: 1.2;
   letter-spacing: 0.02em;
+}
+
+/* ── NoteThumb — first-page A4 preview on note cards (بخش جزوه‌های من) ──
+   A real 794×1123 sheet scaled down by CSS: the same .ProseMirror styles
+   apply inside, so the thumb is a genuine miniature of the page. */
+.pn-note-thumb {
+  position: relative;
+  overflow: hidden;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+.dark .pn-note-thumb { border-color: rgba(255, 255, 255, 0.14); background: var(--page-surface-dark, #171717); }
+/* NoteCard preview strip: soft drop-shadow + hover lift handled by .pn-card-thumb wrapper */
+.pn-card-thumb { filter: drop-shadow(0 2px 6px rgba(0,0,0,0.10)); }
+.pn-note-thumb-chrome, .pn-note-thumb-content {
+  position: absolute;
+  top: 0;
+  right: 0;
+  pointer-events: none;
+  user-select: none;
+}
+.pn-note-thumb-chrome { inset: 0; z-index: 1; }
+.pn-note-thumb-chrome svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.pn-note-thumb-content {
+  z-index: 2;
+  transform-origin: top right;
+  padding: 30px 32px; /* framed sheet padding — thumbnail of page 1 */
+  overflow: hidden;
 }
 
 /* ── Custom right-click context menu (راست‌کلیک سفارشی) ──────── */

@@ -47,6 +47,14 @@ export const BOOKLET_GEOMETRY = {
    *  its ~13px ink width rides the border band, so the text reserve needs
    *  just slot + air beyond the outer line */
   rightOrnW: 20,
+  /** half the logo's measured ink stripe (13px wide) — the ONLY part of
+   *  the right ornament the writable area must clear */
+  logoInkHalf: 7,
+  /** breathing room between the writable right edge and the logo ink —
+   *  SMALLER than safeAir on purpose: the ink is decorative chrome riding
+   *  the rules, not content; a full safeAir here ate writing width the
+   *  user repeatedly reported as missing */
+  rightTextAir: 5,
 } as const;
 
 /** inner frame line inset (px) — the second, finer rule of the double frame */
@@ -56,20 +64,21 @@ export const BOOKLET_INNER_INSET =
  *  SINGLE SOURCE OF TRUTH: the booklet safe area is DERIVED from the frame
  *  geometry above, not hand-tuned — the writable box is the area between
  *  the inner frame line (L) and a breathing inset (AIR). The right edge
- *  clears only the LOGO'S REAL INK, not the whole slot: the art's ink is a
- *  13px stripe riding the frame band ((M+L)/2 centerline — measured ink
- *  box in PageBorder.buildBookletArt), so reserving the full slot+air (48)
- *  wasted ~10px of writing width and left the sheet visibly lopsided.
- *  right = outer line + slot/2 + AIR clears the ink's left edge by AIR
- *  exactly (ink left ≈ BW − M − slot/2 − 6.5). Symmetry: left uses L+AIR,
- *  right uses M+slot/2+AIR — a 4px optical difference, not a column.
- *  All three mirrors (index.css .page-booklet,
- *  pageModelExport.PAD_OF, pageContentBounds) read the same numbers. */
+ *  clears only the LOGO'S REAL INK plus a slim air (the art's ink is a
+ *  13px stripe seated ON the outer rule — measured ink box in
+ *  PageBorder.buildBookletArt), so reserving the whole slot wasted ~12px
+ *  of writing width and left the sheet visibly lopsided.
+ *  34/30/34/34 — mirrors: index.css .page-booklet, pageModelExport.PAD_OF,
+ *  pageContentBounds. */
 export const BOOKLET_PADDING = {
   top: BOOKLET_INNER_INSET + BOOKLET_GEOMETRY.safeAir,
-  /* right = outer line + HALF the ornament slot + AIR — the ink stripe is
-     centered in the slot, so half a slot is all the text must respect */
-  right: BOOKLET_GEOMETRY.frameInset + BOOKLET_GEOMETRY.rightOrnW / 2 + BOOKLET_GEOMETRY.safeAir,
+  /* right = outer line + logo-ink half + a slim text air — the ink sits ON
+     the outer rule (PageBorder.buildBookletArt), so its inner tail reaches
+     ~6.5px inside it and the text edge clears it by rightTextAir */
+  right:
+    BOOKLET_GEOMETRY.frameInset
+    + BOOKLET_GEOMETRY.logoInkHalf
+    + BOOKLET_GEOMETRY.rightTextAir,
   bottom: BOOKLET_INNER_INSET + BOOKLET_GEOMETRY.safeAir,
   left: BOOKLET_INNER_INSET + BOOKLET_GEOMETRY.safeAir,
 } as const;
@@ -102,7 +111,7 @@ export function pageContentBounds(kind: PageKind = 'framed'): PageContentBounds 
 /** THE one authoritative inset policy per page kind — consumed by the
  *  floating-object layer (movement/resize bounds) and by any future surface
  *  that needs the usable box. Keep in sync with index.css `.page-*` padding:
- *  framed 30/32, blank 38, notebook 38, booklet 34/36/34/34. */
+ *  framed 30/32, blank 38, notebook 38, booklet 34/30/34/34. */
 export function pagePadding(kind: PageKind = 'framed'): { top: number; right: number; bottom: number; left: number } {
   if (kind === 'framed') return { ...FRAMED_PADDING };
   if (kind === 'booklet') return { ...BOOKLET_PADDING };

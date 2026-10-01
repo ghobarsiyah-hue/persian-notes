@@ -23,6 +23,13 @@ export interface INote extends Document {
    *  sends the revision it based its edit on and a stale base gets a 409
    *  instead of a silent out-of-order overwrite (persistence layer §4) */
   revision: number;
+  /** DURABILITY (§ reliability milestone): the collaboration room's
+   *  monotonic persistence generation that produced the current content.
+   *  Server-authoritative (never client-supplied); missing on legacy notes
+   *  (= 0) which keeps them fully loadable — no migration required. The
+   *  room flush refuses to write when the stored generation is newer than
+   *  its candidate, so a stale async write can never resurrect old state. */
+  roomGeneration: number;
   /** when true, this note is a user-defined template and can be cloned */
   isTemplate: boolean;
   metadata: {
@@ -52,6 +59,7 @@ const NoteSchema = new Schema<INote>(
     trashedAt: { type: Date, default: null },
     wordCount: { type: Number, default: 0 },
     revision: { type: Number, default: 0 },
+    roomGeneration: { type: Number, default: 0 },
     metadata: { type: Schema.Types.Mixed, default: {} },
   },
   { timestamps: true }

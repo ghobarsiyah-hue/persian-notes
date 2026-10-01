@@ -903,8 +903,13 @@ function buildBookletArt(settings: BorderSettings): {
         /* measured ink constants of 007.png (740×624) — see note above */
         const CANVAS_W = 740, CANVAS_H = 624;
         const INK = { x: 102, y: 190, w: 533, h: 256 };
-        /* the frame band the art must read ON: outer→inner right lines */
-        const bandCenter = BW - (M + L) / 2;          // ≈773 (band 770..776)
+        /* the rule the art must read ON: the OUTER right line — sitting on
+           the band's centerline pushed the ink ~3.5px INTO the writable
+           area and (with the slim text air) starved the right margin the
+           user keeps reporting as too tight. The outer rule keeps the tab
+           look (ink still spans both rules visually) while reclaiming the
+           interior. */
+        const bandCenter = BW - M;                    // outer right rule
         const slotCx = ornX + ornW / 2;
         /* ink page-width target: the band (6px) + optical air on both
            sides — reads as a stripe riding the two rules */
@@ -914,10 +919,11 @@ function buildBookletArt(settings: BorderSettings): {
         const drawnH = CANVAS_H * scale;
         /* pre-rotation slot coords: rotate +90° maps a point at slot-local
            y to page-x = ornX + ornW − y, so seating the ink's center on the
-           band (page-x = BW − (M+L)/2) needs slot-y center = (L−M)/2. The
-           ink's slot-x centers on the slot; imgLeft/imgTop are the drawn
-           image's top-left offsets INSIDE the slot. */
-        const inkSlotYCenter = (L - M) / 2;
+           outer rule (page-x = BW − M) needs slot-y center = 0 — the ink
+           centers exactly on the outer rule. The ink's slot-x centers on
+           the slot; imgLeft/imgTop are the drawn image's top-left offsets
+           INSIDE the slot. */
+        const inkSlotYCenter = 0;
         const inkSlotXC = ornW / 2;   // slot-local: ink centers on the slot
         /* «یکم بالاتر»: post-rotation page-y mirrors pre-rotation slot-x,
            so shifting the drawn image LEFT inside the slot moves the ink UP

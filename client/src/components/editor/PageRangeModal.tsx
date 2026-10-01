@@ -353,7 +353,7 @@ export function PageRangeModal({ open, mode, pages, border, originPageNo, onClos
 
         {error && <ErrorText>{error}</ErrorText>}
 
-        <div className="flex items-center justify-end gap-2 border-t border-ink-100 pt-3 dark:border-ink-800">
+        <div className="pn-side-footer mt-auto flex shrink-0 items-center justify-end gap-2 border-t border-ink-100 pt-3 dark:border-ink-800">
           <Button variant="secondary" onClick={onClose}>انصراف</Button>
           <Button onClick={submit}>
             {mode === 'header' ? 'اعمال سربرگ' : 'اعمال قالب'}

@@ -6,7 +6,7 @@ import { printCss } from '@/utils/printCss';
 import { PreviewBody } from './PreviewBody';
 import { DEFAULT_BORDER_SETTINGS } from '@/types';
 import type { BorderSettings } from '@/types';
-import { resolveEduBlocks } from '@/utils/eduBlocks';
+import { resolveEduBlocks, isTinted } from '@/utils/eduBlocks';
 
 /** options that survive into the export — everything the editor already has */
 export interface PageSettings {
@@ -27,6 +27,10 @@ interface Props {
   /** the real page model: one ExportPage per editor page → one PDF page each */
   pages: ExportPage[];
   meta: { title: string; subject?: string; chapter?: string };
+  /** PER-NOTE design (content.noteDesign): when provided it wins over the
+   *  user's global settings so the PDF matches THIS note's editor sheets */
+  noteBorder?: BorderSettings;
+  noteEduBlocks?: ReturnType<typeof resolveEduBlocks>;
 }
 
 /**
@@ -35,21 +39,22 @@ interface Props {
  * replica of the editable sheets, with no print-only options that could
  * distort the output.
  */
-export function PrintPreviewModal({ open, onClose, html, pages, meta }: Props) {
+export function PrintPreviewModal({ open, onClose, html, pages, meta, noteBorder, noteEduBlocks }: Props) {
   const { settings, toast } = useApp();
 
   /* Everything the export needs already lives on the document/editor — the
-     modal is read-only and can no longer introduce print-only distortion. */
+     modal is read-only and can no longer introduce print-only distortion.
+     PER-NOTE design wins over the global settings when provided. */
   const pageSettings = useMemo<PageSettings>(
     () => ({
-      border: { ...DEFAULT_BORDER_SETTINGS, ...(settings?.border ?? {}) } as BorderSettings,
+      border: { ...DEFAULT_BORDER_SETTINGS, ...(noteBorder ?? settings?.border ?? {}) } as BorderSettings,
       fontSize: settings?.editor.fontSize ?? 16,
       lineHeight: settings?.editor.lineHeight ?? 2,
       fontFamily: settings?.editor.fontFamily,
-      eduTinted: (settings?.editor.eduBlocks ?? 'minimal') === 'tinted',
-      eduBlocks: resolveEduBlocks(settings?.editor.eduBlocks) ?? undefined,
+      eduTinted: noteEduBlocks ? isTinted(noteEduBlocks) : (settings?.editor.eduBlocks ?? 'minimal') === 'tinted',
+      eduBlocks: noteEduBlocks ?? resolveEduBlocks(settings?.editor.eduBlocks) ?? undefined,
     }),
-    [settings?.border, settings?.editor.fontSize, settings?.editor.lineHeight, settings?.editor.fontFamily, settings?.editor.eduBlocks]
+    [noteBorder, noteEduBlocks, settings?.border, settings?.editor.fontSize, settings?.editor.lineHeight, settings?.editor.fontFamily, settings?.editor.eduBlocks]
   );
 
   const [preview, setPreview] = useState<{ html: string; count: number }>({ html: '', count: 0 });

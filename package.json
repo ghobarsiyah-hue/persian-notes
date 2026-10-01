@@ -15,7 +15,8 @@
     "build": "npm run build -w client",
     "start": "npm run start -w server",
     "seed": "npm run seed -w server",
-    "typecheck": "npm run typecheck -w server && npm run typecheck -w client"
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w client",
+    "smoke": "node scripts/deploy-smoke.mjs"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

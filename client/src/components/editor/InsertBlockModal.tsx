@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { SidePanel, Button } from '@/components/ui';
 import { useApp } from '@/store/AppProvider';
 import type { EduBlocksSettings } from '@/types';
@@ -27,7 +27,8 @@ import {
 
 export type InsertKind =
   | { mode: 'edu'; kind: CalloutKind }
-  | { mode: 'question'; kind: 'short' | 'long' | 'truefalse' | 'mcq' };
+  | { mode: 'question'; kind: 'short' | 'long' | 'truefalse' | 'mcq' }
+  | { mode: 'compare'; kind: 'matrix' };
 
 interface InsertEntry {
   id: string;
@@ -67,6 +68,14 @@ const QUESTION_ENTRIES: InsertEntry[] = [
   { id: 'mcq', label: 'چهارگزینه‌ای', desc: '۴ گزینه زیر هم یا دو ستون', tint: '#b45309' },
 ];
 
+/* مقایسه بین دو یا چند چیز — the matrix-compare block surfaced in the
+   کادر آموزشی modal (its own entry with a live preview; Enter adds a new
+   «چیز» column up to ۴ inside the block itself). */
+const COMPARE_ENTRY: InsertEntry = {
+  id: 'matrix', label: 'مقایسه بین دو یا چند چیز',
+  desc: 'جدول ویژگی‌ها برای ۲ تا ۴ مورد', tint: '#0070f3',
+};
+
 /** title colors for question families map onto edu families */
 const QUESTION_TINT: Record<string, string> = {
   short: '#7928ca',
@@ -77,6 +86,34 @@ const QUESTION_TINT: Record<string, string> = {
 
 /* ── live preview — the SAME .edu-block markup the editor renders, tinted
    with the user's current edu settings so the preview matches the page ── */
+
+function ComparePreview({ settings }: { settings: EduBlocksSettings }) {
+  const c = FAMILY_TITLE_DEFAULT.definition ?? '#0070f3';
+  const th = (label: string, w?: string) => (
+    <th style={{ padding: '4px 6px', borderBottom: '1.5px solid rgba(0,112,243,0.35)', fontSize: 11.5, fontWeight: 700, color: c, width: w }}>{label}</th>
+  );
+  const td = (label: string) => (
+    <td style={{ padding: '4px 6px', borderBottom: '1px solid rgba(0,0,0,0.06)', fontSize: 11.5, color: 'inherit' }}>{label}</td>
+  );
+  return (
+    <PreviewFrame settings={settings}>
+      <PreviewTitle settings={settings} color={c} label="مقایسهٔ چندگانه" />
+      <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+        <thead>
+          <tr>
+            <th style={{ width: '26%' }} />
+            {th('چیز ۱')}{th('چیز ۲')}
+          </tr>
+        </thead>
+        <tbody>
+          <tr>{td('ویژگی اول')}{td('…')}{td('…')}</tr>
+          <tr>{td('ویژگی دوم')}{td('…')}{td('…')}</tr>
+        </tbody>
+      </table>
+      <div className="mt-1 text-[10.5px] text-ink-400">+ افزودن ویژگی — و Enter روی نام چیز، ستون جدید (تا ۴)</div>
+    </PreviewFrame>
+  );
+}
 
 function PreviewFrame({ settings, children }: { settings: EduBlocksSettings; children: React.ReactNode }) {
   const radius = settings.radius ?? 6;
@@ -203,12 +240,25 @@ export function InsertBlockModal({
     [eduSettings],
   );
 
-  const entries = mode === 'edu' ? EDU_ENTRIES : QUESTION_ENTRIES;
+  const entries = mode === 'edu' ? [...EDU_ENTRIES, COMPARE_ENTRY] : QUESTION_ENTRIES;
   const [selected, setSelected] = useState<string>(entries[0]?.id ?? '');
 
+  /* the shared shell mounts ONCE for both modes — `selected` must follow the
+     mode, or the question panel keeps the last edu id ('definition'), the
+     highlight disappears, and «درج» ships an invalid kind that silently
+     inserts nothing (the «پنل سوالات کار نمی‌کند» report). Reset to the
+     mode's first entry whenever the panel opens or the mode flips. */
+  useEffect(() => {
+    if (open) setSelected(entries[0]?.id ?? '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, mode]);
+
   const pick = (id: string) => {
-    setSelected(id);
-    onInsert(mode === 'edu' ? { mode: 'edu', kind: id as CalloutKind } : { mode: 'question', kind: id as 'short' });
+    /* guard: fall back to the mode's first entry if the id is foreign */
+    const safeId = entries.some((e) => e.id === id) ? id : (entries[0]?.id ?? id);
+    setSelected(safeId);
+    if (mode === 'edu' && safeId === 'matrix') onInsert({ mode: 'compare', kind: 'matrix' });
+    else onInsert(mode === 'edu' ? { mode: 'edu', kind: safeId as CalloutKind } : { mode: 'question', kind: safeId as 'short' });
   };
 
   return (
@@ -246,9 +296,11 @@ export function InsertBlockModal({
         <div>
           <div className="mb-1.5 text-[13px] font-medium text-ink-700 dark:text-ink-300">پیش‌نمایش</div>
           <div className="rounded-xl bg-white p-4 shadow-inner ring-1 ring-ink-100 dark:bg-ink-950 dark:ring-ink-800" style={{ minHeight: 180 }}>
-            {mode === 'edu'
-              ? <EduPreview kind={selected as CalloutKind} settings={current ?? ({} as EduBlocksSettings)} />
-              : <QuestionPreview kind={selected as 'short' | 'long' | 'truefalse' | 'mcq'} settings={current ?? ({} as EduBlocksSettings)} />}
+            {mode === 'question'
+              ? <QuestionPreview kind={selected as 'short' | 'long' | 'truefalse' | 'mcq'} settings={current ?? ({} as EduBlocksSettings)} />
+              : selected === 'matrix'
+                ? <ComparePreview settings={current ?? ({} as EduBlocksSettings)} />
+                : <EduPreview kind={selected as CalloutKind} settings={current ?? ({} as EduBlocksSettings)} />}
           </div>
           <p className="mt-2 text-[11px] leading-4 text-ink-400">
             پیش‌نمایش با استایل فعلی کادرهای شما رندر می‌شود — همین ظاهر در صفحه درج خواهد شد.
@@ -256,7 +308,7 @@ export function InsertBlockModal({
         </div>
       </div>
 
-      <div className="mt-5 flex items-center justify-end gap-2 border-t border-ink-100 pt-4 dark:border-ink-800">
+      <div className="pn-side-footer mt-auto flex shrink-0 items-center justify-end gap-2 border-t border-ink-100 pt-4 dark:border-ink-800">
         <Button variant="secondary" onClick={onClose}>انصراف</Button>
         <Button onClick={() => pick(selected)}>درج</Button>
       </div>

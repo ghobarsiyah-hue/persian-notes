@@ -191,7 +191,13 @@ export function SidePanel({ open, onClose, title, children }: { open: boolean; o
   if (!open) return null;
   /* PORTAL to body — same containing-block trap as Modal (backdrop-filter
      ancestors). Anchored to the LEFT edge, full height, no overlay: the page
-     stays usable behind it; the shadow keeps the layer readable. */
+     stays usable behind it; the shadow keeps the layer readable.
+
+     FOOTER DOCKING (user request): panels whose action bar used to sit
+     mid-viewport (directly after a short content block) now stretch to the
+     full height and the CONTENT row flexes (min-h-0) so a bottom bar sticks
+     to the viewport bottom. A footer must opt in with `pn-side-footer` +
+     `shrink-0` — panels without one simply leave empty space at the bottom. */
   return createPortal(
     <aside
       className="fixed inset-y-0 left-0 z-[480] flex w-[min(660px,94vw)] flex-col border-r border-ink-100 bg-white dark:border-ink-800 dark:bg-[#161616]"
@@ -210,11 +216,11 @@ export function SidePanel({ open, onClose, title, children }: { open: boolean; o
           ✕
         </button>
       </div>
-      {/* NO inner scroll of its own — the panels' content is designed to fit
-          the viewport (wide two-column layouts instead of stacked lists).
-          overflow-y-auto is only an emergency fallback for very short
-          windows; the previous overflow-hidden silently CLIPPED content. */}
-      <div className="grow overflow-y-auto p-3.5">{children}</div>
+      {/* grow+min-h-0: content takes the remaining height; short content
+          pushes any `pn-side-footer` bar to the bottom edge instead of
+          leaving it floating mid-panel. overflow-y-auto stays an emergency
+          fallback for very short windows. */}
+      <div className="flex min-h-0 grow flex-col overflow-y-auto p-3.5">{children}</div>
     </aside>,
     document.body,
   );

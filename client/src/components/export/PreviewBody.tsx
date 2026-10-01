@@ -4,6 +4,7 @@ import { useApp } from '@/store/AppProvider';
 import { buildPagesHtml, buildPrintDocument, assertPageCount, type ExportPage } from '@/utils/pageModelExport';
 import { printCss as printCssOf } from '@/utils/printCss';
 import { prepareWordHtml, buildWordEduCss, buildWordHeaderFooter } from '@/utils/wordExport';
+import { copyPagesToClipboard } from '@/utils/copyPage';
 import { faDigits } from '@/utils/fa';
 import type { PageSettings } from '@/utils/print';
 
@@ -26,6 +27,32 @@ export function PreviewBody({ html, pages, meta, pageSettings, preview }: Props)
   const { toast } = useApp();
   const [saving, setSaving] = useState(false);
   const [printing, setPrinting] = useState(false);
+  const [copying, setCopying] = useState(false);
+
+  /* ── کپی صفحه با استایل و آیتم‌ها (user request) ──
+     The SAME page snapshots the PDF pipeline renders → the clipboard gets
+     the faithful sheet replica (قاب + notebook lines + floats + edu styles). */
+  const doCopy = async () => {
+    setCopying(true);
+    try {
+      const flavor = await copyPagesToClipboard({
+        pages,
+        meta,
+        settings: {
+          border: pageSettings.border,
+          fontSize: pageSettings.fontSize,
+          lineHeight: pageSettings.lineHeight,
+          eduTinted: pageSettings.eduTinted,
+          eduBlocks: pageSettings.eduBlocks,
+        },
+      });
+      if (flavor === 'html') toast('صفحات با استایل و آیتم‌ها کپی شد — در هر برنامه‌ای Past کنید.', 'success');
+      else if (flavor === 'plain') toast('متن صفحات کپی شد (مرورگر اجازهٔ کپی قالب نداد).', 'info');
+      else toast('کپی ناموفق بود.', 'error');
+    } finally {
+      setCopying(false);
+    }
+  };
 
   const doPrint = () => {
     setPrinting(true);
@@ -140,6 +167,17 @@ export function PreviewBody({ html, pages, meta, pageSettings, preview }: Props)
         >
           {saving ? 'در حال آماده‌سازی…' : '▬ خروجی Word (DOC)'}
         </button>
+        <button
+          type="button"
+          onClick={() => void doCopy()}
+          disabled={copying}
+          className="rounded-lg border border-ink-300 px-4 py-2 text-sm hover:bg-ink-100 disabled:opacity-60 dark:border-ink-700 dark:hover:bg-ink-800"
+        >
+          {copying ? 'در حال کپی…' : '⧉ کپی صفحه با استایل و آیتم‌ها'}
+        </button>
+        <p className="text-[11px] leading-5 text-ink-500">
+          کپی، همهٔ صفحات پیش‌نمایش را با قاب، کادرها و آیتم‌های شناور در کلیپ‌بورد می‌گذارد.
+        </p>
         <p className="mt-auto text-[11px] leading-5 text-ink-500">
           برای PDF در پنجره چاپ، «Save as PDF» را انتخاب کنید.
         </p>

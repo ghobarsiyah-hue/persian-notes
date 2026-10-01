@@ -81,10 +81,18 @@ export function reconcilePagesFromStructure<T extends { id: string; pageNumber: 
 ): T[] | null {
   const order = session.readPageOrder();
   if (order.length === 0) return null;
+  /* collapse duplicates deterministically (concurrent create+move can
+     briefly produce one id twice in the order) — first occurrence wins */
+  const seen = new Set<string>();
+  const uniqueOrder = order.filter((id) => {
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
   const sameShape =
-    order.length === current.length &&
-    order.every((id, i) => id === current[i].id) &&
-    order.every((id) => {
+    uniqueOrder.length === current.length &&
+    uniqueOrder.every((id, i) => id === current[i].id) &&
+    uniqueOrder.every((id) => {
       const meta = session.readPageMeta(id);
       const page = current.find((p) => p.id === id);
       return page && page.kind === meta.kind && page.auto === meta.auto;
@@ -93,8 +101,11 @@ export function reconcilePagesFromStructure<T extends { id: string; pageNumber: 
 
   /* deterministic projection: order + meta WIN (canonical remote state —
      §23); content/floats of surviving pages are PRESERVED (existing page
-     objects are reused by id so React keys and editor instances survive) */
-  return order.map((id, i) => {
+     objects are reused by id so React keys and editor instances survive).
+     Duplicate ids in the order (a concurrent create+move race can produce
+     one) are collapsed to the FIRST occurrence — one page object per id,
+     never two editors bound to the same fragment. */
+  return uniqueOrder.map((id, i) => {
     const meta = session.readPageMeta(id);
     const existing = current.find((p) => p.id === id);
     return {

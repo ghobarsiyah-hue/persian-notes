@@ -35,6 +35,20 @@ npm run seed        # demo user: demo@pernote.local / demo1234
 
 The login page has a one-click **demo login** button.
 
+## Deploy
+
+Deployment-ready for **Render (recommended — tested reachable on this network,
+persistent Node, live collaboration WebSockets work)**, plus Vercel
+(static + serverless API) and Railway configs. See
+**[DEPLOY-RENDER.md](./DEPLOY-RENDER.md)**,
+**[DEPLOY-RAILWAY.md](./DEPLOY-RAILWAY.md)** or
+**[DEPLOY-VERCEL.md](./DEPLOY-VERCEL.md)** for the full Persian guides.
+Quick check before pushing:
+
+```bash
+npm run smoke    # boots the real production build against an in-memory MongoDB
+```
+
 ### MongoDB (no install needed for dev)
 
 The server connects to `MONGODB_URI` (default `mongodb://127.0.0.1:27017/persian-notes`).
@@ -46,8 +60,12 @@ required:
   (or point `MONGO_DEV_BINARY` at one explicitly)
 - otherwise downloads the binary **once** via `mongodb-memory-server`
   (needs internet for the first run only)
-- stores data in `server/.mongo-data`, so accounts and notes **survive
-  restarts**
+- stores data OUTSIDE the repo in the local AppData
+  (`%LOCALAPPDATA%\persian-notes\mongo-data` on Windows), so accounts and
+  notes **survive restarts** and OneDrive/Dropbox sync folders can never
+  crash mongod (WiredTiger is incompatible with file-lock storms from sync
+  tools — the old in-repo `server/.mongo-data` location is copied there
+  automatically once; override with `MONGO_DEV_DBPATH`)
 
 For production, install MongoDB or point `MONGODB_URI` at Atlas.
 

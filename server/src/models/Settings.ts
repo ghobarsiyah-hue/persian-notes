@@ -59,6 +59,8 @@ export interface ISettings extends Document {
     showFooter: boolean;
     showPageNumbers: boolean;
     sideLabel: string;
+    /** lesson/chapter label in the frame's top header slot (item 16) */
+    headerLabel?: string;
   };
   createdAt: Date;
   updatedAt: Date;
@@ -147,6 +149,10 @@ const SettingsSchema = new Schema<ISettings>(
           showFooter: { type: Boolean, default: true },
           showPageNumbers: { type: Boolean, default: true },
           sideLabel: { type: String, default: '' },
+          /** WITHOUT this line mongoose strict mode SILENTLY DROPPED the field
+           *  on save() — the zod layer passed it through but the سربرگ never
+           *  persisted (the «بازه/قالب اعمال نمیشه» report) */
+          headerLabel: { type: String, default: '' },
         },
         { _id: false }
       ),

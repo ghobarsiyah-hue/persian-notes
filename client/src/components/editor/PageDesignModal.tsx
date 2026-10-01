@@ -81,7 +81,9 @@ export function PageDesignModal({
 }: PageDesignModalProps) {
   const active = resolveActive(activePageKind, border);
   const showFrameDecor = active === 'classic';
+  /* the booklet template shares the header-label feature with classic */
   const showHeader = active === 'classic' || active === 'booklet';
+  /* booklet shows its own color section above — no classic decor section */
 
   /* ── gallery: every card renders its REAL chrome (no fake thumbnails) ── */
   const gallery = useMemo(() => {
@@ -301,6 +303,40 @@ export function PageDesignModal({
             </section>
           )}
 
+          {/* خیلی سبز: the template FOLLOWS BorderSettings colors (PageBorder
+              buildBookletArt), so the user must be able to pick them from the
+              same panel — the section was classic-only, leaving the booklet
+              color unchangeable from here (the «رنگش میشه عوض شه ولی اپشنش
+              نیست» report). The band-fill row is hidden: the booklet has no
+              fill band, its second line derives from the primary choice. */}
+          {active === 'booklet' && (
+            <section className="space-y-2.5">
+              <div className="text-[12px] font-bold text-ink-700 dark:text-ink-200">رنگ قالب خیلی سبز</div>
+              <div>
+                <div className="mb-1 text-[11px] text-ink-500 dark:text-ink-400">رنگ قاب</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {FRAME_COLORS.map((c) => (
+                    <button
+                      key={c.label}
+                      type="button"
+                      title={c.label}
+                      onClick={() => onBorderChange({ primaryColor: c.primary, secondaryColor: c.secondary })}
+                      className={`h-6 w-9 overflow-hidden rounded-md border transition-transform hover:scale-105 ${
+                        border.primaryColor?.toLowerCase() === c.primary ? 'border-[#0070f3] ring-1 ring-[#0070f3]' : 'border-ink-200 dark:border-ink-700'
+                      }`}
+                    >
+                      <span className="block h-1/2 w-full" style={{ background: c.primary }} />
+                      <span className="block h-1/2 w-full" style={{ background: c.secondary }} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <p className="text-[10.5px] leading-4 text-ink-400">
+                خط دوم قاب، نسخه‌ی ملایم‌شده‌ی همین رنگ است و خودکار هماهنگ می‌ماند.
+              </p>
+            </section>
+          )}
+
           {showHeader && (
             <section className="space-y-2">
               <div className="text-[12px] font-bold text-ink-700 dark:text-ink-200">سربرگ درس</div>
@@ -366,7 +402,8 @@ export function PageDesignModal({
         </div>
       </div>
 
-      <div className="mt-4 flex items-center justify-end border-t border-ink-100 pt-3 dark:border-ink-800">
+      {/* docked to the panel's bottom edge (pn-side-footer) — not floating mid-viewport */}
+      <div className="pn-side-footer mt-auto flex shrink-0 items-center justify-end border-t border-ink-100 pt-3 dark:border-ink-800">
         <Button onClick={onClose}>اتمام</Button>
       </div>
     </SidePanel>

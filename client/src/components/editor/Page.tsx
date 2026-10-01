@@ -26,6 +26,7 @@ import Subscript from '@tiptap/extension-subscript';
 import { FontSize } from '@/editor/extensions/FontSize';
 import { FontFamily } from '@/editor/extensions/FontFamily';
 import { Indent } from '@/editor/extensions/Indent';
+import { installEduPanelClickFollow } from '@/editor/ribbon/contextual/contexts/eduBlockStyleModalHost';
 import {
   CalloutBlock,
   QuestionBlock,
@@ -42,13 +43,16 @@ import {
   CodeOutputBlock,
   TrueFalseBlock,
   McqBlock,
+  MatrixCompareBlock,
+  OrderStepsBlock,
 } from '@/editor/extensions/blocks';
 import { Equation, EquationInline, EquationExtension } from '@/editor/extensions/EquationNode';
 import { SlashCommand } from '@/editor/extensions/SlashCommand';
 import { DragHandle } from '@/editor/extensions/DragHandle';
 import { PageBreak } from '@/editor/extensions/PageBreak';
 import { TableEscape } from '@/editor/extensions/TableEscape';
-import { BlockEnter } from '@/editor/extensions/BlockEnter';
+import { BlockEnter, BlockBoundaryGuard, BOX_NODES } from '@/editor/extensions/BlockEnter';
+import { Selection } from '@tiptap/pm/state';
 import { TableRowResizing } from '@/editor/extensions/TableRowResizing';
 import { PagedDoc } from '@/editor/extensions/PagedDoc';
 import { FixedPageGuard } from '@/editor/extensions/FixedPageGuard';
@@ -71,6 +75,8 @@ const A4_H_PX = 1123;
  *  trap must be transparent to those or it would loop forever. Module-scope:
  *  one flag per process is enough — the guarded region is synchronous. */
 let pnNestedEditApplying = false;
+
+
 
 /** every nested contenteditable span the trap protects: question/box titles,
  *  MCQ option texts, comparison-table labels, pro/con + code/output areas.
@@ -106,6 +112,11 @@ export const EMPTY_FLOATS_LIST: FloatingElement[] = [];
  *  structurally different markup than mounted ones. */
 export function buildEditorExtensions() {
   return [
+    /* FIRST — its handleKeyDown must outrun StarterKit's stock keymap:
+       Backspace at the start of a plain paragraph after a box must HOP into
+       the box (deleting) instead of structurally MERGING the plain text
+       INTO the box body («متن عادی می‌رود تو باکس سوال تشریحی» report) */
+    BlockBoundaryGuard,
     /* PagedDoc replaces StarterKit's stock Document so the FIRST page's
        visual kind (attrs.pageKind) survives save → load — the stock doc
        node declares no attributes and TipTap strips unknown ones */
@@ -333,6 +344,8 @@ export function buildEditorExtensions() {
     CodeOutputBlock,
     TrueFalseBlock,
     McqBlock,
+    MatrixCompareBlock,
+    OrderStepsBlock,
     /* structured equations — real AST-backed document objects */
     Equation,
     EquationInline,
@@ -525,6 +538,12 @@ export const Page = memo(function PageInner({
 
   const editor = useEditor({
     extensions: [
+      /* FIRST — must outrun StarterKit's stock keymap: Backspace at the
+         start of a plain paragraph after a box HOPS into the box (deleting)
+         instead of structurally MERGING the plain text INTO the box body
+         («متن عادی می‌رود تو باکس سوال تشریحی» report). Mirrors
+         buildEditorExtensions (static schema) — the two stay identical. */
+      BlockBoundaryGuard,
       /* PagedDoc replaces StarterKit's stock Document so the FIRST page's
          visual kind (attrs.pageKind) survives save → load — the stock doc
          node declares no attributes and TipTap strips unknown ones */
@@ -761,6 +780,8 @@ export const Page = memo(function PageInner({
       CodeOutputBlock,
       TrueFalseBlock,
       McqBlock,
+      MatrixCompareBlock,
+      OrderStepsBlock,
       /* structured equations — real AST-backed document objects */
       Equation,
       EquationInline,
@@ -808,6 +829,15 @@ export const Page = memo(function PageInner({
         class: 'pn-editor focus:outline-none',
         'data-gramm': 'false',
       },
+      /* ── Backspace boundary guard (TOP priority — view props beat every
+         plugin, so no keymap race can swallow it) ──
+         User report: «حذف متن بعد از کادر، متن عادی می‌رود تو باکس سوال
+         تشریحی». Stock joinBackward merges the plain paragraph AFTER an edu
+         box INTO the box's last body paragraph. Word-like rule instead:
+         the FIRST Backspace at that boundary HOPS the caret to the end of
+         the box's body (where the next Backspace deletes real content);
+         the plain text is never structurally pulled into the box. */
+
       /* ── Backspace/Delete in nested edit spans (edu titles, MCQ options) ──
          Chromium reports these spans' keydown with target = the PM ROOT
          (focus lives on the contenteditable host, not the nested span), so
@@ -818,7 +848,94 @@ export const Page = memo(function PageInner({
          checks where the DOM caret ACTUALLY is, applies the deletion with
          execCommand (the MutationObserver on the span then syncs attrs)
          and consumes the key so PM never acts on its stale selection. */
-      handleKeyDown: (_view: unknown, event: KeyboardEvent) => {
+      handleKeyDown: (view: any, event: KeyboardEvent) => {
+        /* ── Backspace boundary guard (TOP priority — view props beat every plugin) ──
+           «حذف فاصله بین دو باکس، دو باکس را ادغام/ناپدید می‌کند» root cause
+           chain, reproduced live: stock Backspace (joinBackward) DELETES A
+           WHOLE BOX NODE from every doc-level boundary where the previous
+           doc child is a box — the caret lands there three different ways:
+           1. START of the first body paragraph INSIDE a box whose previous
+              sibling is another box (doc → box → paragraph: depth 2!) —
+              removing the gap paragraph between two boxes puts the caret
+              exactly here; press = the UPPER box (title + all) vanishes.
+           2. START of a plain paragraph AFTER a box — press = that paragraph
+              is pulled INTO the box («متن عادی می‌رود تو باکس» report) or
+              an empty one is eaten and the boxes close up.
+           3. END of the box's own EMPTY body paragraph — the empty inner
+              paragraph joins OUTWARD and the box wrapper dies with it.
+           Word-like rule for ALL of them: Backspace at a box boundary never
+           deletes/merges STRUCTURE — it becomes a caret HOP into the box's
+           last body paragraph (where the NEXT Backspace deletes real
+           content), or a no-op swallow when the body is already empty. */
+        if (event.key === 'Backspace' && view) {
+          try {
+            /* ═══ TITLE-CARET SHORT-CIRCUIT (user report: «متن روی سوال
+               ادیت/حذف نمی‌شود، بک‌اسپیس کار نمی‌کند») ═══
+               While typing in a nested title span (edu-title-text, MCQ
+               option, …) Chromium keeps the DOM caret INSIDE the span but
+               ProseMirror's INTERNAL selection stays wherever it last was
+               — frequently the box's EMPTY body paragraph. The structural
+               guard below reads THAT stale position, matches its case
+               (a)–(c), and swallows/hops the key: every Backspace inside
+               the title dies and the question text can never be edited or
+               deleted. Rule: when the REAL DOM caret lives in a nested
+               edit span, this guard must NOT run at all — those keys are
+               content edits inside the span, handled by the span path
+               (execCommand delete → MutationObserver → setNodeMarkup). */
+            const domAnchor0 = window.getSelection()?.anchorNode ?? null;
+            const inSpan0 = domAnchor0 && ((domAnchor0 instanceof Element ? domAnchor0 : domAnchor0.parentElement)?.closest?.(NESTED_EDIT_SPANS) as HTMLElement | null);
+            if (inSpan0 && inSpan0.isContentEditable) {
+              /* fall through to the span deletion path below */
+            } else {
+            const { state } = view;
+            const { $from, empty } = state.selection;
+            if (empty && $from.parentOffset === 0) {
+              /* the doc-level sibling BEFORE the caret's chain — climb to
+                 depth 1 and look at the previous doc child */
+              const idx = $from.index(0);
+              const nodeBefore = idx > 0 ? state.doc.child(idx - 1) : null;
+              const prevIsBox = nodeBefore && BOX_NODES.has(nodeBefore.type.name);
+              /* case 3: the box's own EMPTY last body paragraph (previous
+                 doc child IS the box we're inside) — stock would join the
+                 paragraph outward and DELETE the whole box. The caret has
+                 nowhere left to go INSIDE the box (nothing before it), so
+                 HOP the caret out to the END of the previous textblock —
+                 the caret visibly moves (the swallowed no-op read as a
+                 DEAD KEY), the box survives. */
+              const parentIsBox = BOX_NODES.has($from.node(1)?.type.name ?? '');
+              if (parentIsBox && $from.parent.isTextblock && $from.parent.content.size === 0) {
+                /* pos-1 sits INSIDE the box wrapper (before its body) —
+                   near(-1) there can re-resolve to the same caret. Escape
+                   the box WRAPPER entirely: the boundary just before the
+                   box node, then near(-1) → the previous textblock (gap
+                   paragraph / previous box body). */
+                let target = null;
+                try {
+                  const boxStart = $from.before(1);
+                  target = Selection.near(state.doc.resolve(boxStart), -1);
+                } catch { target = null; }
+                if (target && !target.eq(state.selection)) {
+                  view.dispatch(state.tr.setSelection(target).scrollIntoView());
+                  view.focus();
+                }
+                event.preventDefault();
+                return true;
+              }
+              /* cases 1+2: previous doc child is another/upper box — HOP
+                 into that box's last body paragraph instead of deleting or
+                 merging anything */
+              if (prevIsBox) {
+                const $end = state.doc.resolve($from.pos - 1);
+                const target = Selection.near($end, -1);
+                view.dispatch(state.tr.setSelection(target).scrollIntoView());
+                view.focus();
+                event.preventDefault();
+                return true;
+              }
+            }
+            } /* end of span short-circuit else */
+          } catch { /* fall through to the normal handlers */ }
+        }
         if (event.key !== 'Backspace' && event.key !== 'Delete') return false;
         const sel = window.getSelection();
         const anchor = sel?.anchorNode ?? null;
@@ -948,6 +1065,13 @@ export const Page = memo(function PageInner({
     editorRef?.(editor ?? null);
     return () => editorRef?.(null);
   }, [editor, editorRef]);
+
+  /* click-follow for the edu شخصی‌سازی panel: click an edu block with the
+     panel closed → it OPENS; click another block while open → SWITCHES;
+     click an empty page spot → CLOSES. Idempotent. */
+  useEffect(() => {
+    if (editor) installEduPanelClickFollow(editor);
+  }, [editor]);
 
   /* QA automation hook (dev/E2E tests only): expose this page's editor so a
      test driver can dispatch transactions and read measurements without

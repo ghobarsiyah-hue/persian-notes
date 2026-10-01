@@ -4,7 +4,7 @@ import type {
 } from '../types';
 import { h4 } from '../icons';
 import type { Editor } from '@tiptap/core';
-import { Copy, Trash2, Repeat, GraduationCap, BookOpen, Star, AlertCircle, HelpCircle, Hash, FlaskConical, Lightbulb, Paintbrush, Palette, CheckCircle, ListChecks } from 'lucide-react';
+import { Copy, Trash2, Repeat, GraduationCap, BookOpen, Star, AlertCircle, HelpCircle, Hash, FlaskConical, Lightbulb, Paintbrush, Palette, CheckCircle, ListChecks, Columns, ListOrdered } from 'lucide-react';
 import { openEduBlockStyleModal, openEduQuestionStyleModal } from './eduBlockStyleModalHost';
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -29,7 +29,7 @@ export const EDUBLOCK_CONTEXT_ID = 'context.edublock';
 const EDU_BLOCK_TYPES = new Set([
   'calloutBlock', 'questionBlock', 'exampleBlock', 'keyTermBlock',
   'longAnswerBlock', 'footnoteBlock', 'highlightBox', 'referenceBlock',
-  'trueFalseBlock', 'mcqBlock',
+  'trueFalseBlock', 'mcqBlock', 'matrixCompareBlock', 'orderStepsBlock',
 ]);
 
 interface EduBlockAttrs extends Record<string, unknown> {
@@ -71,7 +71,8 @@ const CALLOUT_KINDS: Array<{ kind: string; label: string; icon: React.ReactNode 
 
 type EduType =
   | 'calloutBlock' | 'questionBlock' | 'exampleBlock' | 'keyTermBlock'
-  | 'longAnswerBlock' | 'trueFalseBlock' | 'mcqBlock';
+  | 'longAnswerBlock' | 'trueFalseBlock' | 'mcqBlock'
+  | 'matrixCompareBlock' | 'orderStepsBlock';
 
 const TYPE_LABEL: Record<EduType, string> = {
   calloutBlock: 'کادر (تعریف/نکته/…)',
@@ -81,6 +82,8 @@ const TYPE_LABEL: Record<EduType, string> = {
   longAnswerBlock: 'پاسخ تشریحی',
   trueFalseBlock: 'درست / نادرست',
   mcqBlock: 'چهارگزینه‌ای',
+  matrixCompareBlock: 'مقایسهٔ چندگانه',
+  orderStepsBlock: 'مراحل به‌ترتیب',
 };
 
 const TYPE_ICON: Record<EduType, React.ReactNode> = {
@@ -91,6 +94,8 @@ const TYPE_ICON: Record<EduType, React.ReactNode> = {
   longAnswerBlock: h4(GraduationCap),
   trueFalseBlock: h4(CheckCircle),
   mcqBlock: h4(ListChecks),
+  matrixCompareBlock: h4(Columns),
+  orderStepsBlock: h4(ListOrdered),
 };
 
 /** the title/question/term attr of each edu type — carried over on convert */
@@ -102,6 +107,8 @@ const TITLE_ATTR: Record<EduType, string> = {
   longAnswerBlock: 'question',
   trueFalseBlock: 'question',
   mcqBlock: 'qTitle',
+  matrixCompareBlock: 'topic',
+  orderStepsBlock: 'topic',
 };
 
 function convertType(editor: Editor, from: EduType, to: EduType, extraAttrs: Record<string, unknown> = {}) {

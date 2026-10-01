@@ -55,7 +55,7 @@ const PAD_OF: Record<PageKind, string> = {
   notebook: mmpx(38),
   cover: mmpx(38),
   toc: mmpx(38),
-  booklet: `${mmpx(BOOKLET_PADDING.top)} ${mmpx(BOOKLET_PADDING.right)} ${mmpx(BOOKLET_PADDING.bottom)} ${mmpx(BOOKLET_PADDING.left)}`, /* خیلی سبز — derived from pageCapacity.BOOKLET_PADDING (34/38/34/34) */
+  booklet: `${mmpx(BOOKLET_PADDING.top)} ${mmpx(BOOKLET_PADDING.right)} ${mmpx(BOOKLET_PADDING.bottom)} ${mmpx(BOOKLET_PADDING.left)}`, /* خیلی سبز — derived from pageCapacity.BOOKLET_PADDING (34/30/34/34) */
 };
 
 /** One application page snapshot handed to the exporter by the editor. */
@@ -378,13 +378,20 @@ export function buildPagesHtml(
           })()
         : '';
       const floats = floatingElementsHtml(page.floatingElements, i, total, kind);
+      /* EDITING PLACEHOLDERS MUST NEVER EXPORT (user report: an emptied
+         question title printed the default «سوال تشریحی»). The editor shows
+         placeholders via [data-ph]:empty::before in index.css; the preview
+         pane renders in the SAME document, so the rule leaks into the
+         export. Strip the data-ph hooks here — the placeholder then cannot
+         exist in any export target (preview pane, print window, Word). */
+      const exportHtml = page.html.replace(/\sdata-ph="[^"]*"/g, '');
       return `<section class="pn-page" data-page="${i + 1}">
   <div class="pn-sheet">
   ${borderSvg}
   ${notebookSvg}
   ${coverLayer}
   ${tocLayer}
-  <div class="pn-sheet-content" style="padding:${PAD_OF[kind]};font-size:${options.fontSize}px;line-height:${options.lineHeight}">${page.html}</div>
+  <div class="pn-sheet-content" style="padding:${PAD_OF[kind]};font-size:${options.fontSize}px;line-height:${options.lineHeight}">${exportHtml}</div>
   ${floats}
   </div>
 </section>`;

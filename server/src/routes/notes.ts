@@ -225,6 +225,15 @@ router.patch(
     if (data.trashed !== undefined) {
       note.trashed = data.trashed;
       note.trashedAt = data.trashed ? new Date() : null;
+      /* §29 COLLABORATION: a trashed group note must stop accepting
+         collaborative edits immediately — connected clients are told and
+         their seats released (server authority; the room is torn down). */
+      if (data.trashed && note.groupId) {
+        try {
+          const { handleCollabNoteRemoved } = await import('../collab/hub.js');
+          handleCollabNoteRemoved(String(note._id), 'trashed');
+        } catch { /* collab infra not booted (tests) — trash still applies */ }
+      }
     }
 
     note.revision = (note.revision ?? 0) + 1;
@@ -258,6 +267,13 @@ router.delete(
     const note = await resolveNoteAccess(req.params.id, req.user!.id, 'edit');
     if (!note) throw new ApiError(404, 'یادداشت یافت نشد.');
     await Version.deleteMany({ noteId: note._id });
+    /* §29 COLLABORATION: any live room for this note is notified + torn
+       down BEFORE the note row disappears — no client can keep writing to
+       (or resurrect) a deleted note. */
+    try {
+      const { handleCollabNoteRemoved } = await import('../collab/hub.js');
+      handleCollabNoteRemoved(String(note._id), 'deleted');
+    } catch { /* collab infra not booted (tests) — delete still applies */ }
     res.json({ ok: true });
   })
 );

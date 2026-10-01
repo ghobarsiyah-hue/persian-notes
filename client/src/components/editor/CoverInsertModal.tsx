@@ -293,7 +293,7 @@ export function CoverInsertModal({
         </div>
       </div>
 
-      <div className="mt-5 flex items-center justify-end gap-2 border-t border-ink-100 pt-4 dark:border-ink-800">
+      <div className="pn-side-footer mt-auto flex shrink-0 items-center justify-end gap-2 border-t border-ink-100 pt-4 dark:border-ink-800">
         <Button variant="secondary" onClick={onClose}>انصراف</Button>
         <Button onClick={insert} disabled={loading}>افزودن صفحه</Button>
       </div>

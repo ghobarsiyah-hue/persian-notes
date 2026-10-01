@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { User } from '../models/User.js';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,12 +31,40 @@ let mongodProc: ChildProcess | null = null;
 type MemServerHandle = { stop: (opts?: { doCleanup?: boolean }) => Promise<unknown> };
 let memServer: MemServerHandle | null = null;
 
-/** server/.mongo-data regardless of the process cwd (tsx watch runs with cwd=server,
- *  but someone may also run `node server/dist/index.js` from the repo root) */
-const DB_DATA_DIR = path.resolve(
+/** WiredTiger (mongod's storage engine) is INCOMPATIBLE with OneDrive/Dropbox
+ *  sync folders: their lock/rename/rehydrate storms kill mongod with random
+ *  fassert() crashes (half a dozen .mdmp dumps in the user cache proved it).
+ *  The data dir therefore lives in the local AppData — OUTSIDE every sync
+ *  folder. The legacy in-repo server/.mongo-data is migrated once below.
+ *  Override with MONGO_DEV_DBPATH if needed. */
+const APP_DATA =
+  process.env.LOCALAPPDATA ||
+  process.env.XDG_DATA_HOME ||
+  path.join(process.env.USERPROFILE || process.env.HOME || '.', 'AppData', 'Local');
+const DB_DATA_DIR =
+  process.env.MONGO_DEV_DBPATH ||
+  path.join(APP_DATA, 'persian-notes', 'mongo-data');
+/** previous location (inside the possibly-synced checkout) — migrated away */
+const LEGACY_DATA_DIR = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)), // server/src/config | server/dist/config
   '..', '..', '.mongo-data',
 );
+
+/** one-time relocation of the legacy in-repo data dir to the local AppData.
+ *  Copies (never deletes — the old copy stays as a last-resort backup) so
+ *  accounts/notes survive the move. Runs only when nothing is serving the
+ *  port (the existing-mongod connect path above already returned). */
+function migrateLegacyDataDir(): void {
+  if (existsSync(path.join(DB_DATA_DIR, 'WiredTiger'))) return; // already migrated / in use
+  if (!existsSync(path.join(LEGACY_DATA_DIR, 'WiredTiger'))) return; // nothing to move
+  try {
+    mkdirSync(path.dirname(DB_DATA_DIR), { recursive: true });
+    cpSync(LEGACY_DATA_DIR, DB_DATA_DIR, { recursive: true, force: true });
+    console.log(`✓ داده‌های MongoDB به مسیر محلیِ خارج از OneDrive منتقل شد: ${DB_DATA_DIR}`);
+  } catch (err) {
+    console.warn('⚠ انتقال داده‌های قدیمی MongoDB ناموفق بود (با dbpath خالی ادامه می‌دهیم):', (err as Error).message);
+  }
+}
 
 function probePort(port: number, host: string, timeoutMs = 1500): Promise<boolean> {
   return new Promise((resolve) => {
@@ -120,27 +148,41 @@ function reportNoBinary(): never {
   throw new Error('dev MongoDB unavailable');
 }
 
-/** spawn a persistent mongod for development with a project-local data dir.
- *  Detects an instant exit (port conflict on a stale mongod with the same
- *  dbpath, corrupted WiredTiger lock, …) instead of burning the full wait. */
+/** spawn a persistent mongod for development (data dir OUTSIDE sync folders —
+ *  see DB_DATA_DIR). Detects an instant exit (port conflict on a stale mongod
+ *  with the same dbpath, corrupted WiredTiger lock, OneDrive file lock, …)
+ *  instead of burning the full wait, and CAPTURES stderr so the REAL mongod
+ *  error reaches the console — stdio:'ignore' used to hide every fassert()
+ *  message behind a bare «Mongod internal error». */
 async function startPersistentMongod(bin: string): Promise<boolean> {
-  const dbPath = DB_DATA_DIR;
-  try { mkdirSync(dbPath, { recursive: true }); } catch { return false; }
+  try { mkdirSync(DB_DATA_DIR, { recursive: true }); } catch { return false; }
   try {
     let exited = false;
+    const stderrTail: string[] = [];
     mongodProc = spawn(bin, [
-      '--dbpath', dbPath,
+      '--dbpath', DB_DATA_DIR,
       '--port', String(DEV_DB_PORT),
       '--bind_ip', DEV_DB_HOST,
       /* '--nojournal' removed: mongod 7.x REJECTS it ('unrecognised option')
          and exits instantly, which made the whole dev fallback fail */
-    ], { stdio: 'ignore', windowsHide: true });
+    ], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+    mongodProc.stderr?.on('data', (chunk: Buffer) => {
+      const text = chunk.toString().trim();
+      if (!text) return;
+      stderrTail.push(text);
+      if (stderrTail.length > 25) stderrTail.shift();
+    });
     mongodProc.on('error', () => { mongodProc = null; exited = true; });
     mongodProc.on('exit', () => { mongodProc = null; exited = true; });
     /* give it a beat; an instant crash means the wait loop below is pointless */
-    return await new Promise<boolean>((resolve) => {
+    const alive = await new Promise<boolean>((resolve) => {
       setTimeout(() => resolve(!exited), 1200);
     });
+    if (!alive && stderrTail.length) {
+      console.error('✗ mongod بلافاصله متوقف شد — پیام خود باینری:');
+      for (const line of stderrTail.slice(-8)) console.error('   ' + line.split('\n').join('\n   '));
+    }
+    return alive;
   } catch {
     return false;
   }
@@ -209,19 +251,28 @@ export async function connectDB(): Promise<void> {
       } catch { /* fall through and try spawning */ }
     }
     console.warn(`⚠ MongoDB تنظیم‌شده (${env.mongoUri}) در دسترس نیست — راه‌اندازی MongoDB محلیِ پایدار برای توسعه…`);
-    const bin = findMongodBinary();
-    let started = bin ? await startPersistentMongod(bin) : false;
-    if (!started) {
-      started = await downloadAndStartViaMemoryServer();
+    migrateLegacyDataDir();
+    /* a mongod boot crash here is usually TRANSIENT (OneDrive/AV briefly
+       locking a WiredTiger file mid-startup) — one retry turns a hard
+       dev-server failure into a couple of seconds of delay */
+    let started = false;
+    for (let attempt = 1; attempt <= 2 && !started; attempt++) {
+      if (attempt > 1) {
+        console.warn('⚠ تلاش دوم برای راه‌اندازی mongod (crash قبلی معمولاً گذراست — قفل لحظه‌ای فایل‌ها)…');
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+      const bin = findMongodBinary();
+      started = bin ? await startPersistentMongod(bin) : false;
+      if (!started) started = await downloadAndStartViaMemoryServer();
     }
     if (!started || !(await waitUntilReachable())) {
       if (!started) reportNoBinary();
       /* started but never answered: stale lock / port conflict */
-      console.error('✗ mongod راه‌اندازی شد ولی روی پورت پاسخ نداد — احتمالاً یک mongod قدیمی با همان dbpath در حال اجراست یا فایل‌های قفل خراب‌اند. پوشه server/.mongo-data را پس از بستن پروسه‌ها پاک کنید.');
+      console.error(`✗ mongod راه‌اندازی شد ولی روی پورت پاسخ نداد — پروسه‌های mongod را ببندید و پوشهٔ داده (${DB_DATA_DIR}) را پاک کنید، یا MONGO_DEV_DBPATH را در .env به مسیر دیگری تنظیم کنید.`);
       throw new Error('dev MongoDB unavailable');
     }
     await mongoose.connect(`mongodb://${DEV_DB_HOST}:${DEV_DB_PORT}/persian-notes`);
-    console.log(`✓ MongoDB پایدار (توسعه) آماده است — داده‌ها در server/.mongo-data نگهداری می‌شوند و با ری‌استارت پاک نمی‌شوند.`);
+    console.log(`✓ MongoDB پایدار (توسعه) آماده است — داده‌ها در ${DB_DATA_DIR} نگهداری می‌شوند (خارج از OneDrive) و با ری‌استارت پاک نمی‌شوند.`);
     await migrateUserIndexes();
   }
 }

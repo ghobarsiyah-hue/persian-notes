@@ -29,6 +29,11 @@ export const ONE_SEAT_PER_USER = true;
  *  persistence path and its baseRevision/409 contract is untouched. */
 export const ROOM_PERSIST_INTERVAL_MS = 5_000;
 
+/** Bounded wait for the graceful-shutdown flush of dirty rooms (§12). A
+ *  dead Mongo can delay the exit by at most this long; the outcome is
+ *  logged honestly (flushed/failed/timed-out), never faked as success. */
+export const SERVER_SHUTDOWN_FLUSH_TIMEOUT_MS = 8_000;
+
 /** Close codes / reasons sent to clients (Mirrored on the client adapter). */
 export const COLLAB_CLOSE = {
   UNAUTHORIZED: 4001,

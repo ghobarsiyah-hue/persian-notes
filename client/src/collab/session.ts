@@ -24,7 +24,12 @@
 
 import * as Y from 'yjs';
 import { Awareness, encodeAwarenessUpdate, applyAwarenessUpdate } from 'y-protocols/awareness';
-import { getToken } from '@/api/client';
+
+/** the SAME token source as api/client.ts (pn_token in localStorage) —
+ *  inlined instead of imported so this module stays dependency-free of the
+ *  '@/…' path aliases and is directly unit-testable from the server suite */
+const getToken = (): string | null =>
+  (typeof localStorage !== 'undefined' ? localStorage.getItem('pn_token') : null);
 
 /* ── shared constants (mirrored from server/src/collab/constants.ts) ────── */
 export const MAX_ACTIVE_EDITORS = 4;
@@ -36,6 +41,15 @@ const RECONNECT_BASE_DELAY_MS = 600;
 export type CollabConnState = 'connecting' | 'connected' | 'reconnecting' | 'offline';
 export type CollabSeatState = 'active' | 'view' | 'acquiring';
 export type CollabDenyReason = 'capacity' | 'forbidden';
+/** §2 UX state model — WHY this tab is view-only right now. Distinct from
+ *  denyReason (which is a JOIN-time outcome): viewOnlyReason describes a
+ *  mid-session DEMOTION and is cleared when a seat is (re)acquired.
+ *    'transferred' — the same user opened a newer tab (ONE_SEAT_PER_USER)
+ *    'released'    — stale seat (heartbeat lost / server released it)
+ *    'revoked'     — permission/membership revoked mid-session
+ *    'note-deleted' — the server says this note no longer exists
+ */
+export type CollabViewOnlyReason = 'transferred' | 'released' | 'revoked' | 'note-deleted';
 
 export interface CollabEditorPresence {
   sessionId: string;
@@ -50,9 +64,19 @@ export interface CollabSessionState {
   seat: CollabSeatState;
   /** null while unknown/disabled — personal notes are not collaborative */
   denyReason: CollabDenyReason | null;
+  /** §2: set when an ACTIVE session is demoted mid-session (see the type);
+   *  null while active or when the join itself was denied (that is
+   *  denyReason's job). The UI must be able to tell "another tab took
+   *  over" apart from "you were never allowed". */
+  viewOnlyReason: CollabViewOnlyReason | null;
   activeEditors: CollabEditorPresence[];
   maxEditors: number;
   revision: number;
+  /** DURABILITY (§10): the Note.revision the server last DURABLY persisted
+   *  for this room (from the `persisted` ack frame). 0 = nothing acked yet.
+   *  The editor folds this into the autosave baseRevision so the room's own
+   *  Mongo writes never race the client's REST saves into a 409. */
+  persistedRevision: number;
 }
 
 export interface PageStructureEntry {
@@ -76,10 +100,12 @@ type ServerFrame =
   | { t: 'seat.released' }
   | { t: 'denied'; reason: CollabDenyReason }
   | { t: 'revoked' }
+  | { t: 'note.deleted' }
   | { t: 'sync.step2'; u64: string }
   | { t: 'update'; u64: string; from?: string }
   | { t: 'awareness'; u64: string }
   | { t: 'restored'; doc: Record<string, unknown> }
+  | { t: 'persisted'; revision: number; generation: number }
   | { t: 'server.ack'; n: number };
 
 const b64decode = (s: string): Uint8Array => {
@@ -203,10 +229,18 @@ export class CollabSession {
     conn: 'connecting',
     seat: 'view',
     denyReason: null,
+    viewOnlyReason: null,
     activeEditors: [],
     maxEditors: MAX_ACTIVE_EDITORS,
     revision: 0,
+    persistedRevision: 0,
   };
+
+  /** set by the editor integration: called when the server acks a DURABLE
+   *  Mongo persistence (revision advanced server-side). The autosave
+   *  scheduler re-seeds its baseRevision from it — ONE SaveState stays the
+   *  single authority; collab only FEEDS it (no second indicator, §11). */
+  onPersisted: ((revision: number, generation: number) => void) | null = null;
 
   constructor(private noteId: string, private events: SessionEvents) {
     this.awareness = new Awareness(this.doc);
@@ -277,13 +311,15 @@ export class CollabSession {
 
   /** MOVE_PAGE — reorder by id: pull the entry out, place it immediately
    *  BEFORE `beforeId` (null = append at the end). Concurrent reorders
-   *  converge through yjs list semantics (§5). */
+   *  converge through yjs list semantics (§5). A page deleted concurrently
+   *  is never resurrected into the order (no phantom pages, §4); a deleted
+   *  anchor falls back to append. */
   opMovePage(pageId: string, beforeId: string | null): void {
     this.doc.transact(() => {
       const order = this.pageOrder;
       const ids = order.toArray();
       const from = ids.indexOf(pageId);
-      if (from < 0) return;
+      if (from < 0) return; // deleted concurrently → nothing to move
       order.delete(from, 1);
       ids.splice(from, 1);
       const targetIdx = beforeId ? ids.indexOf(beforeId) : -1;
@@ -314,17 +350,53 @@ export class CollabSession {
     }, 'local');
   }
 
-  /* ── floats: per-OBJECT semantic state (§7/§8) ──────────────────────── */
+  /* ── floats: per-OBJECT semantic state (§7/§8) ─────────────────────── */
   /** objectId → Y.Map of properties for one page (COMMIT-oriented) */
   floatObjectsFor(pageId: string): Y.Map<unknown> {
     return this.doc.getMap(`floatObj:${pageId}`);
   }
 
-  /** CREATE_FLOAT / full object sync on insert — one entry-level write */
+  /* §24 DELETE-WINS bookkeeping (session-local, never serialized):
+     - publishedFloatIds: objectIds THIS tab has published to the room per
+       page — lets the reconcile distinguish "exists only locally" from
+       "this tab's stale mirror of an object that exists remotely".
+     - floatTombstones: objectIds this tab DELETED (or saw deleted) per
+       page — a later local-only copy of a tombstoned id is a STALE MIRROR
+       of a deleted object and must NOT leak back into persistence as a
+       resurrected object (deletion wins deterministically; a deliberate
+       re-create via opUpsertFloat clears the tombstone). */
+  private publishedFloatIds = new Map<string, Set<string>>();
+  private floatTombstones = new Map<string, Set<string>>();
+  /** keep tombstone sets bounded — >256 deleted objects on ONE page within
+   *  one tab session evicts the oldest marker (harmless: at that point the
+   *  stale mirror is long gone) */
+  private static TOMBSTONE_CAP = 256;
+
+  private tombstoneSetFor(pageId: string): Set<string> {
+    let s = this.floatTombstones.get(pageId);
+    if (!s) { s = new Set(); this.floatTombstones.set(pageId, s); }
+    if (s.size >= CollabSession.TOMBSTONE_CAP) s.delete(s.values().next().value as string);
+    return s;
+  }
+
+  /** true when an object id was already deleted (this tab deleted it, or a
+   *  remote delete landed while a stale local copy lingered). Used by the
+   *  float reconcile to keep deleted objects deleted. */
+  isFloatTombstoned(pageId: string, objectId: string): boolean {
+    return this.floatTombstones.get(pageId)?.has(objectId) ?? false;
+  }
+
+  /** CREATE_FLOAT / full object sync on insert — one entry-level write.
+   *  A deliberate upsert of a previously deleted id clears the tombstone
+   *  (the user re-created the object). */
   opUpsertFloat(pageId: string, obj: Record<string, unknown>): void {
     const oid = String(obj.id ?? '');
     if (!oid) return;
     const objMap = this.floatObjectsFor(pageId);
+    let published = this.publishedFloatIds.get(pageId);
+    if (!published) { published = new Set(); this.publishedFloatIds.set(pageId, published); }
+    published.add(oid);
+    this.floatTombstones.get(pageId)?.delete(oid);
     this.doc.transact(() => {
       let props = objMap.get(oid) as Y.Map<unknown> | undefined;
       if (!(props instanceof Y.Map)) props = objMap.set(oid, new Y.Map<unknown>()) as Y.Map<unknown>;
@@ -349,9 +421,13 @@ export class CollabSession {
     }, 'local');
   }
 
-  /** DELETE_FLOAT — removes the object entry only */
+  /** DELETE_FLOAT — removes the object entry AND tombstones the id so the
+   *  reconcile keeps it deleted (§24: a stale local copy of a concurrently
+   *  deleted object must never resurrect it). */
   opDeleteFloat(pageId: string, objectId: string): void {
     const objMap = this.floatObjectsFor(pageId);
+    this.publishedFloatIds.get(pageId)?.delete(objectId);
+    this.tombstoneSetFor(pageId).add(objectId);
     this.doc.transact(() => {
       objMap.delete(objectId);
     }, 'local');
@@ -443,9 +519,12 @@ export class CollabSession {
 
   /* ── seat operations ─────────────────────────────────────────────────── */
   /** request an editing seat (called when the user starts editing while
-   *  view-only, or when a seat frees up — no page reload involved) */
+   *  view-only, or when a seat frees up — no page reload involved).
+   *  §33: 'forbidden' (permission) is NEVER retried automatically — only
+   *  a fresh join re-evaluates it. 'note-deleted' is likewise terminal. */
   requestSeat(): void {
     if (this.state.seat === 'active' || this.state.denyReason === 'forbidden') return;
+    if (this.state.viewOnlyReason === 'note-deleted') return;
     this.setState({ seat: 'acquiring' });
     this.transport?.send({ t: 'acquire' });
   }
@@ -488,27 +567,38 @@ export class CollabSession {
   private handleFrame(f: ServerFrame): void {
     switch (f.t) {
       case 'joined': {
-        this.sessionId = f.sessionId;
+        this.sessionId = typeof f.sessionId === 'string' ? f.sessionId : '';
         /* apply the room's current state BEFORE flipping seat state so the
            editor renders the converged document immediately */
         if (f.state64) Y.applyUpdate(this.doc, b64decode(f.state64), 'server');
         this.setState({
           seat: f.seat === 'active' ? 'active' : 'view',
           denyReason: null,
-          revision: f.revision,
-          maxEditors: f.maxEditors || MAX_ACTIVE_EDITORS,
+          /* a fresh join resets any stale mid-session demotion reason */
+          viewOnlyReason: null,
+          revision: Number.isFinite(f.revision) ? f.revision : 0,
+          maxEditors: Number.isFinite(f.maxEditors) && f.maxEditors > 0 ? f.maxEditors : MAX_ACTIVE_EDITORS,
+          /* the room's durable revisions are unknown on a fresh join — the
+             next `persisted` ack (or the load-time note revision) re-seeds */
+          persistedRevision: 0,
         });
         if (!f.canEdit) this.setState({ denyReason: 'forbidden' });
         this.requestSync();
         return;
       }
       case 'seats': {
+        /* §28 client-side hygiene: presence entries are shape-checked — a
+           malformed broadcast must never poison React state */
+        const editors = (Array.isArray(f.editors) ? f.editors : []).filter(
+          (e) => e && typeof e.sessionId === 'string' && typeof e.displayName === 'string'
+        );
+        const max = Number.isFinite(f.max) && f.max > 0 ? f.max : MAX_ACTIVE_EDITORS;
         this.setState({
-          activeEditors: f.editors ?? [],
-          maxEditors: f.max || MAX_ACTIVE_EDITORS,
+          activeEditors: editors,
+          maxEditors: max,
           /* server is authoritative about capacity: a 'full' denial may be
              cleared the moment a seat frees up */
-          ...(this.state.denyReason === 'capacity' && (f.editors?.length ?? 0) < (f.max || MAX_ACTIVE_EDITORS)
+          ...(this.state.denyReason === 'capacity' && editors.length < max
             ? { denyReason: null } : {}),
         });
         if (this.state.denyReason === 'capacity' && this.state.seat === 'view') {
@@ -519,14 +609,18 @@ export class CollabSession {
       }
       case 'seat.acquired': {
         this.sessionId = f.sessionId;
-        this.setState({ seat: 'active', denyReason: null });
+        this.setState({ seat: 'active', denyReason: null, viewOnlyReason: null });
         return;
       }
       case 'seat.transferred':
       case 'seat.released': {
         /* this tab lost its seat (2nd tab took over, stale heartbeat, …) —
-           degrade to VIEW-ONLY instantly, never mid-edit ghost-writing */
-        this.setState({ seat: 'view' });
+           degrade to VIEW-ONLY instantly, never mid-edit ghost-writing.
+           §2/§31: the reason is surfaced so the UI can tell the user WHY:
+           'transferred' = another tab of yours took over; 'released' = the
+           server dropped a stale/lost seat (network). Both are recoverable
+           via requestSeat — unlike 'revoked'. */
+        this.setState({ seat: 'view', viewOnlyReason: f.t === 'seat.transferred' ? 'transferred' : 'released' });
         return;
       }
       case 'denied': {
@@ -535,8 +629,16 @@ export class CollabSession {
       }
       case 'revoked': {
         /* permission/membership revoked mid-session — server already
-           released the seat; become view-only (or disconnected next join) */
-        this.setState({ seat: 'view', denyReason: 'forbidden' });
+           released the seat; become view-only (or disconnected next join).
+           §33: NOT retried automatically — permanent until reconnect. */
+        this.setState({ seat: 'view', denyReason: 'forbidden', viewOnlyReason: 'revoked' });
+        return;
+      }
+      case 'note.deleted': {
+        /* §29: the server deleted/trashed this note while we were editing —
+           server authority wins. View-only with an explicit reason; no
+           further writes are attempted (the transport closes server-side). */
+        this.setState({ seat: 'view', viewOnlyReason: 'note-deleted' });
         return;
       }
       case 'restored': {
@@ -544,8 +646,22 @@ export class CollabSession {
            ops inside the frame already reconcile pages/fragments/floats via
            the doc observer; this hook lets the editor integration guard
            local UI state (active page) and inform the user. */
-        this.onRestoredDoc?.(f.doc);
-        this.events.onRestored?.(f.doc);
+        if (f.doc && typeof f.doc === 'object') {
+          this.onRestoredDoc?.(f.doc);
+          this.events.onRestored?.(f.doc);
+        }
+        return;
+      }
+      case 'persisted': {
+        /* §10 PERSISTENCE ACK: the room's canonical state reached Mongo
+           (server-derived revision — never client claims). Fold into the
+           session state AND let the autosave scheduler re-seed its
+           baseRevision so the room's writes never surprise the REST path. */
+        if (Number.isFinite(f.revision) && f.revision > 0) {
+          const rev = f.revision;
+          this.setState({ persistedRevision: Math.max(this.state.persistedRevision, rev) });
+          this.onPersisted?.(rev, Number.isFinite(f.generation) ? f.generation : 0);
+        }
         return;
       }
       case 'sync.step2': {

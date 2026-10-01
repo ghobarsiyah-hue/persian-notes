@@ -3,12 +3,12 @@
 
    ONE canonical document (task §ARCHITECTURAL PRINCIPLE): the room's Y.Doc
    is the merge point for concurrent edits; the Note model remains the
-   PERSISTENCE source of truth and is refreshed FROM the room (room → Note
-   PATCH-equivalent) on an interval. The existing baseRevision/409 REST
-   contract is untouched — collaboration writes go through a dedicated
-   internal bumpNoteContent() that mirrors what the REST PATCH does
-   (content/html/plainText/wordCount/revision+1) without fighting the
-   client autosave.
+   PERSISTENCE source of truth and is refreshed FROM the room on an
+   interval through a MONOTONIC GENERATION-GUARDED flush (see the
+   DURABILITY CONTRACT on CollabRoom). The existing baseRevision/409 REST
+   contract is untouched — the room's own flushes use an ATOMIC conditional
+   Mongo update guarded on (trashed, revision, roomGeneration) so a REST
+   autosave and a room flush can never silently overwrite each other.
 
    ROOM LAYOUT (the multi-page contract §4):
      Y.Map 'metadata'      → title (+ future collab metadata ONLY)
@@ -36,8 +36,11 @@
 
 import * as Y from 'yjs';
 import { Note } from '../models/Note.js';
-import { ROOM_PERSIST_INTERVAL_MS } from './constants.js';
+import { ROOM_PERSIST_INTERVAL_MS, SERVER_SHUTDOWN_FLUSH_TIMEOUT_MS } from './constants.js';
 import { seedPageFragment, jsonBlockToYElement } from './seedJson.js';
+import { validateNoteDocument } from './validateDoc.js';
+import { docJsonFromYRoom } from './roomDoc.js';
+import { plainTextOf, wordCountOf } from './docJson.js';
 
 export interface CollabRoom {
   noteId: string;
@@ -58,6 +61,45 @@ export interface CollabRoom {
   connections: Set<string>;
   /** in-memory only — rooms without connections are dropped */
   createdAt: number;
+
+  /* ── DURABILITY CONTRACT (§ reliability milestone) ─────────────────────
+     roomGeneration is a MONOTONIC, SERVER-AUTHORITATIVE counter (never
+     wall-clock, never client-supplied). Every canonical state that is (or
+     could be) persisted carries one generation. The chain is:
+       local edit → yjs canonical room state → roomGeneration++
+         → pending snapshot → Mongo write (generation-guarded)
+         → durableRevision acknowledged
+     An async Mongo write captures an IMMUTABLE snapshot {generation, doc,
+     title}; on completion it may only commit when the room's generation
+     is STILL the snapshot's generation (or newer durable state has not
+     already superseded it). A delayed older write can NEVER overwrite a
+     newer one — generation 17 finishing after generation 18 is dropped. */
+  roomGeneration: number;
+  /** generation whose Mongo write SUCCEEDED (≤ roomGeneration; the gap is
+   *  the unsaved window a crash could lose) */
+  durableGeneration: number;
+  /** Note.revision at the last successful persist — published to clients
+   *  through the 'server.ack' persistence frame so THEIR next autosave
+   *  bases on the fresh revision instead of racing into a 409 */
+  persistedRevision: number;
+  /** the pending immutable snapshot awaiting/undergoing a Mongo write */
+  pendingWrite: PersistSnapshot | null;
+}
+
+/** An immutable snapshot of a canonical room state, captured at flush
+ *  start. After capture the async persistence NEVER reads mutable room
+ *  state — completion only compares generation numbers. */
+export interface PersistSnapshot {
+  generation: number;
+  noteId: string;
+  doc: Record<string, unknown>;
+  html: string;
+  plainText: string;
+  wordCount: number;
+  title: string | null;
+  /** base revision used for the conditional Mongo update (the Note must
+   *  still be at this revision — or already newer-and-equal) */
+  baseRevision: number;
 }
 
 const rooms = new Map<string, CollabRoom>();
@@ -83,6 +125,10 @@ export function createRoom(noteId: string, initialContent: unknown, revision: nu
     lastRevision: revision,
     connections: new Set(),
     createdAt: Date.now(),
+    roomGeneration: 1,
+    durableGeneration: 0,
+    persistedRevision: revision,
+    pendingWrite: null,
   };
   rooms.set(noteId, room);
 
@@ -90,11 +136,21 @@ export function createRoom(noteId: string, initialContent: unknown, revision: nu
      connect: page structure + float objects ride in Y.Maps keyed by pageId,
      the TEXT content is NOT seeded here — the first editor client sends
      its yjs update (the room is authoritative for yjs content once live).
-     Restarts: the newest autosaved Note reloads below. */
-  try {
-    seedRoomFromNote(room, initialContent);
-  } catch (err) {
-    console.error('[collab] room seed failed', noteId, err);
+     Restarts: the newest autosaved Note reloads below.
+     CORRUPTION DEFENSE (§19): the persisted Note is UNTRUSTED input — a
+     malformed document must not poison the room. On invalid input the
+     room is created EMPTY (the durable Note row is left untouched as the
+     last-known-good; recovery/repair happens client-side). */
+  const validation = validateNoteDocument(initialContent);
+  if (validation.ok) {
+    try {
+      seedRoomFromNote(room, initialContent);
+    } catch (err) {
+      console.error('[collab] room seed failed', noteId, (err as Error)?.message);
+    }
+  } else {
+    console.error(`[collab] room ${noteId}: persisted snapshot rejected (${validation.reason}) — room seeded empty; durable Note left untouched.`);
+    structure.set('lastSavedDoc', null);
   }
   return room;
 }
@@ -203,21 +259,142 @@ export function noteDocumentForPersistence(room: CollabRoom): Record<string, unk
  *  existing optimistic-concurrency bookkeeping stays coherent. Also carries
  *  the collaborative title ('pendingTitle' from the metadata frame) when a
  *  seat holder edited it since the last flush. */
-export async function persistRoom(room: CollabRoom, doc: Record<string, unknown>, html: string, plainText: string, wordCount: number): Promise<void> {
-  const note = await Note.findById(room.noteId).select('revision trashed title');
-  if (!note || note.trashed) return; // note deleted → nothing to persist
-  note.content = doc as object;
-  note.html = html;
-  note.plainText = plainText;
-  note.wordCount = wordCount;
-  const pendingTitle = room.structure.get('pendingTitle');
-  if (typeof pendingTitle === 'string' && pendingTitle.trim()) note.title = pendingTitle;
-  note.revision = (note.revision ?? 0) + 1;
-  await note.save();
-  room.lastRevision = note.revision;
-  room.structure.set('lastSavedDoc', doc);
-  room.structure.set('lastSavedRevision', note.revision);
-  if (typeof pendingTitle === 'string') room.structure.set('lastSavedTitle', pendingTitle);
+/* ── CANONICAL SNAPSHOT CAPTURE ─────────────────────────────────────────
+   One coherent §4 state: content + floats + title come from the SAME
+   generation (never structure of gen 20 with title of gen 19). Called
+   ONLY at flush time — never per keystroke (hot-path posture preserved). */
+function captureSnapshot(room: CollabRoom, nowRevision: number, pendingTitle: string | null): PersistSnapshot | null {
+  const doc = docJsonFromYRoom(room);
+  if (!doc) return null;
+  const v = validateNoteDocument(doc);
+  if (!v.ok) {
+    /* a corrupted projection never reaches Mongo (§19): log safe metadata
+       only — NEVER document content — and keep the room dirty so the
+       problem surfaces instead of silently writing garbage */
+    console.error(`[collab] room ${room.noteId}: flush skipped — invalid projection (${v.reason})`);
+    return null;
+  }
+  return {
+    generation: room.roomGeneration,
+    noteId: room.noteId,
+    doc,
+    html: '',
+    plainText: plainTextOf(doc),
+    wordCount: wordCountOf(doc),
+    title: pendingTitle,
+    baseRevision: nowRevision,
+  };
+}
+
+/**
+ * Persist ONE immutable snapshot with a MONOTONIC GENERATION GUARD.
+ *
+ * Ordering rules (the core anti-stale-write guarantee):
+ *  1. Mongo is updated CONDITIONALLY: `revision: snapshot.baseRevision`
+ *     (or ≥ it when another writer legitimately advanced the note — the
+ *     room then re-reads and only commits if the stored generation is not
+ *     newer). An unconditional last-write-wins never happens.
+ *  2. Completion commits bookkeeping ONLY while
+ *     `snapshot.generation >= room.durableGeneration`. A delayed write
+ *     for generation 17 that finishes after generation 18 succeeded is
+ *     DROPPED — it can neither overwrite the Note nor regress room state.
+ *  3. A failed write leaves the room dirty (the flush loop retries); the
+ *     snapshot is discarded — the RETRY re-captures a FRESH snapshot at
+ *     the then-current generation, so a retry can never resurrect an
+ *     older state either.
+ *  4. A trashed/deleted note aborts the write (persistRoom refuses — the
+ *     §29 no-resurrection guarantee) and drops the pending snapshot.
+ */
+export async function persistRoom(room: CollabRoom): Promise<void> {
+  const note = await Note.findById(room.noteId).select('revision trashed title roomGeneration');
+  if (!note || note.trashed) {
+    room.pendingWrite = null; /* deleted → nothing may resurrect it */
+    return;
+  }
+
+  const snapshot = captureSnapshot(room, note.revision ?? 0, typeof room.structure.get('pendingTitle') === 'string' ? (room.structure.get('pendingTitle') as string) : null);
+  if (!snapshot) return; /* invalid projection — room stays dirty */
+
+  /* IDEMPOTENCE (§17): skip when the canonical state is already durable —
+     no revision churn, no needless 409 exposure. The room is CLEAN only
+     when its content matches what was last persisted. */
+  const lastSaved = room.structure.get('lastSavedDoc');
+  const sameDoc = lastSaved === snapshot.doc || JSON.stringify(lastSaved) === JSON.stringify(snapshot.doc);
+  const titleChanged = Boolean(snapshot.title && snapshot.title.trim() && snapshot.title !== note.title);
+  if (sameDoc && !titleChanged) {
+    room.durableGeneration = Math.max(room.durableGeneration, snapshot.generation);
+    return;
+  }
+
+  room.pendingWrite = snapshot;
+  const noteDoc = note as unknown as { roomGeneration?: number };
+  const storedGeneration = typeof noteDoc.roomGeneration === 'number' ? noteDoc.roomGeneration : 0;
+  if (snapshot.generation < storedGeneration) {
+    /* Mongo already holds a NEWER durable snapshot than this candidate —
+       the in-memory room lost the race against a later writer; adopt the
+       durable state instead of regressing it (§8: no stale resurrection). */
+    room.pendingWrite = null;
+    console.warn(`[collab] room ${room.noteId}: in-memory generation ${snapshot.generation} behind durable ${storedGeneration} — flush aborted, re-sync required.`);
+    return;
+  }
+
+  const title = snapshot.title && snapshot.title.trim() ? snapshot.title : note.title;
+  /* ATOMIC CONDITIONAL UPDATE — never a read-modify-write over a whole
+     document: the update lands only while the note is at the revision we
+     captured (or was untouched by anyone else). A concurrent REST autosave
+     that bumped `revision` makes this write a documented no-op; the next
+     flush re-captures a fresh snapshot against the new revision. */
+  const res = await Note.updateOne(
+    {
+      _id: room.noteId,
+      trashed: { $ne: true },
+      $or: [{ revision: snapshot.baseRevision }, { revision: { $lt: snapshot.baseRevision } }],
+    },
+    {
+      $set: {
+        content: snapshot.doc,
+        html: snapshot.html,
+        plainText: snapshot.plainText,
+        wordCount: snapshot.wordCount,
+        title,
+        roomGeneration: snapshot.generation,
+      },
+      $inc: { revision: 1 },
+    }
+  );
+  if (res.modifiedCount === 0) {
+    room.pendingWrite = null;
+    /* someone else (REST autosave / restore) advanced the note: NOT an
+       error — the room stays dirty and the NEXT flush re-captures against
+       the newer revision. Never blind-retry the stale payload. */
+    console.warn(`[collab] room ${room.noteId}: flush generation ${snapshot.generation} skipped — note advanced concurrently (revision ${snapshot.baseRevision} → re-capture next tick).`);
+    return;
+  }
+
+  /* SUCCESS — commit bookkeeping only if no newer state has taken over
+     while the write was in flight (generation 10 finishing after 11 is
+     dropped here, both in memory and — by construction — in Mongo). */
+  if (snapshot.generation >= room.durableGeneration) {
+    room.durableGeneration = snapshot.generation;
+    /* the REAL post-write revision — re-read instead of assuming base+1:
+       a concurrent writer may have $inc'd between our write and now, and
+       the ack published to clients must be monotonic and truthful */
+    const fresh = await Note.findById(room.noteId).select('revision');
+    room.persistedRevision = Math.max(
+      room.persistedRevision,
+      fresh?.revision ?? 0,
+      snapshot.baseRevision + 1
+    );
+    room.lastRevision = room.persistedRevision;
+    room.structure.set('lastSavedDoc', snapshot.doc);
+    room.structure.set('lastSavedRevision', room.persistedRevision);
+    if (snapshot.title) room.structure.set('lastSavedTitle', snapshot.title);
+    room.pendingWrite = null;
+    console.log(`[collab] room ${room.noteId}: generation ${snapshot.generation} persisted (revision ${room.persistedRevision}).`);
+  } else {
+    room.pendingWrite = null;
+    console.log(`[collab] room ${room.noteId}: generation ${snapshot.generation} write completed but ${room.durableGeneration} is already durable — dropped.`);
+  }
 }
 
 /** throttled persistence entry — the hub calls markRoomDirty(room) on every
@@ -227,22 +404,86 @@ export function markRoomDirty(room: CollabRoom): void {
   if (!room.dirtySince) room.dirtySince = Date.now();
 }
 
-/** interval tick — persist dirty rooms (single-flight per room) */
-export async function flushDirtyRooms(flushRoom: (room: CollabRoom) => Promise<void>): Promise<void> {
+/** interval tick — persist dirty rooms (single-flight per room).
+    RETRY-SAFE (§17): a failed persistence keeps `dirtySince` set so the
+    next tick retries — a transient Mongo failure can never silently drop
+    the room's unsaved collaborative state. Each retry re-captures a FRESH
+    snapshot at the current generation (never replays the failed payload). */
+export async function flushDirtyRooms(flushRoom?: (room: CollabRoom) => Promise<void>): Promise<void> {
   const now = Date.now();
   for (const room of rooms.values()) {
     if (room.persisting || !room.dirtySince) continue;
     if (now - room.dirtySince < ROOM_PERSIST_INTERVAL_MS) continue;
     room.persisting = true;
     try {
-      await flushRoom(room);
+      if (flushRoom) await flushRoom(room);
+      else await persistRoom(room);
+      /* success → clean ONLY when the room's canonical generation is fully
+         durable. A skipped/aborted flush (concurrent REST write, stale
+         generation, invalid projection) leaves durable < current and the
+         room dirty — it is retried next tick, never silently dropped. */
+      if (room.durableGeneration >= room.roomGeneration) room.dirtySince = 0;
     } catch (err) {
-      console.error('[collab] room persist failed', room.noteId, err);
+      console.error('[collab] room persist failed', room.noteId, (err as Error)?.message);
+      /* dirtySince intentionally KEPT — retried on the next tick with a
+         FRESH snapshot (the failed one is discarded by the capture) */
     } finally {
       room.persisting = false;
-      room.dirtySince = 0;
     }
   }
+}
+
+/* ═════════════════════════════════════════════════════════════════════
+   GRACEFUL SHUTDOWN (§12) — flush every dirty room, bounded.
+
+   Called by server/src/index.ts on SIGTERM/SIGINT BEFORE Mongo goes
+   away. Guarantees:
+     - every dirty room gets ONE final flush attempt (fresh snapshot)
+     - the wait is BOUNDED (SERVER_SHUTDOWN_FLUSH_TIMEOUT_MS) — a dead
+       Mongo can never hang the process exit
+     - when Mongo is unavailable the failure is LOGGED and the shutdown
+       proceeds; the loss window is then bounded by the same interval as
+       a hard crash (honest failure, not a fake success)
+   ═════════════════════════════════════════════════════════════════════ */
+export async function flushAllRoomsOnShutdown(): Promise<{ flushed: number; skipped: number; failed: number }> {
+  const dirty = [...rooms.values()].filter((r) => r.dirtySince && !r.persisting);
+  let flushed = 0;
+  let skipped = 0;
+  let failed = 0;
+  await Promise.race([
+    Promise.all(
+      dirty.map(async (room) => {
+        room.persisting = true;
+        try {
+          await persistRoom(room);
+          if (room.durableGeneration >= room.roomGeneration) {
+            room.dirtySince = 0;
+            flushed++;
+          } else {
+            /* honest accounting: the write was skipped (concurrent writer /
+               stale generation) — the durable state stays authoritative */
+            skipped++;
+          }
+        } catch (err) {
+          failed++;
+          console.error(`[collab] shutdown flush failed for room ${room.noteId}: ${(err as Error)?.message}`);
+        } finally {
+          room.persisting = false;
+        }
+      })
+    ),
+    new Promise<void>((resolve) => setTimeout(resolve, SERVER_SHUTDOWN_FLUSH_TIMEOUT_MS).unref()),
+  ]);
+  const timedOut = dirty.length - flushed - skipped - failed;
+  console.log(`[collab] shutdown flush: ${flushed} persisted, ${skipped} skipped (newer durable state), ${failed} failed, ${timedOut} timed out (bounded at ${SERVER_SHUTDOWN_FLUSH_TIMEOUT_MS}ms).`);
+  return { flushed, skipped, failed };
+}
+
+/** debug/diagnostic — current durability state of one room (never content) */
+export function roomDurability(noteId: string): { roomGeneration: number; durableGeneration: number; persistedRevision: number; dirty: boolean } | null {
+  const r = rooms.get(noteId);
+  if (!r) return null;
+  return { roomGeneration: r.roomGeneration, durableGeneration: r.durableGeneration, persistedRevision: r.persistedRevision, dirty: Boolean(r.dirtySince) };
 }
 
 /** drop a room when nobody is connected (its doc is already persisted or
@@ -260,6 +501,11 @@ export function roomCount(): number {
   return rooms.size;
 }
 
+/** diagnostic/ack snapshot of live rooms (never content) */
+export function roomsSnapshot(): CollabRoom[] {
+  return [...rooms.values()];
+}
+
 /* ═════════════════════════════════════════════════════════════════════
    SYSTEM ops — version restore through the live room (§20).
 
@@ -274,6 +520,13 @@ export function roomCount(): number {
 /** apply a §4 document into the room as a SYSTEM restore operation.
  *  Returns the projected canonical doc after the replacement. */
 export function applySystemRestore(room: CollabRoom, restoredDoc: Record<string, unknown>): void {
+  /* CORRUPTION DEFENSE (§19): a restored snapshot is untrusted input.
+     An invalid version payload must NEVER become the room's canonical
+     state — the durable pre-restore Note stays the last-known-good and
+     the restore route surfaces the error to the user. */
+  const v = validateNoteDocument(restoredDoc);
+  if (!v.ok) throw new Error(`restore rejected: ${v.reason}`);
+
   const structure = room.structure;
   const doc = restoredDoc as { content?: Array<Record<string, unknown>>; attrs?: Record<string, unknown> } | null;
   const blocks = Array.isArray(doc?.content) ? doc!.content : [];
@@ -359,8 +612,15 @@ export function applySystemRestore(room: CollabRoom, restoredDoc: Record<string,
     }
     room.doc.getMap('floats:p1').set('list', floats);
 
-    /* 4. bookkeeping: lastSavedDoc becomes the restored doc */
-    structure.set('lastSavedDoc', restoredDoc);
-    structure.set('pendingDoc', restoredDoc);
+    /* 4. bookkeeping: the restore is a NEW canonical generation — any older
+          async flush still in flight is invalidated by the generation guard
+          (its snapshot is now older than the restored state and can never
+          commit). lastSavedDoc is deliberately NOT touched here: it is the
+          DURABLE mirror and only a successful persistRoom may advance it.
+          Setting it to the restored doc would make the next flush see
+          pending==lastSaved, skip as "idempotent" and leave the restore
+          unpersisted (a real bug the reliability test caught). */
+    room.roomGeneration += 1;
   }, 'local');
+  markRoomDirty(room);
 }

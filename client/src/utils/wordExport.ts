@@ -128,7 +128,7 @@ function enhanceWordTables(html: string): string {
          grid never matches the editor. none = بدون خط */
       const grid = table.getAttribute('data-grid')
         ?? (/(?:^|;)\s*--pn-grid\s*:\s*([^;]+)/.exec(table.getAttribute('style') || '')?.[1]?.trim())
-        ?? '#b9a7e0';
+        ?? '#c8bce8';
       if (align) table.setAttribute('align', align);
       if (width) table.setAttribute('width', width);
 
@@ -152,6 +152,11 @@ function enhanceWordTables(html: string): string {
            cells), so the striping is visible exactly like on the page */
         if (striped && (r + 1) % 2 === 0) {
           cells.forEach((td) => { if (!td.style.backgroundColor) td.style.backgroundColor = '#f4f4f5'; });
+        }
+        /* سر ستون — بنفش کم‌رنگ سیستم (هم‌ادیتور: #f2ecfb) — Word cells
+           carry no default header fill otherwise */
+        if (grid && r === 0 && !!tr.querySelector('th')) {
+          cells.forEach((td) => { if (td.tagName === 'TH' && !td.style.backgroundColor) td.style.backgroundColor = '#f2ecfb'; });
         }
         if (borderless || (cellpad && WORD_CELLPAD[cellpad])) {
           cells.forEach((td) => {

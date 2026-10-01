@@ -41,10 +41,16 @@ import * as Y from 'yjs';
 import { applyAwarenessUpdate, Awareness } from 'y-protocols/awareness';
 import { authenticateUpgrade, resolveCollabAccess, tokenFromUpgradeRequest } from './auth.js';
 import { sessionStore } from './sessionStore.js';
-import { createRoom, getRoom, destroyRoomIfIdle, markRoomDirty, flushDirtyRooms, persistRoom, type CollabRoom } from './rooms.js';
+import { parseClientFrame } from './protocol.js';
+import { createRoom, getRoom, destroyRoomIfIdle, markRoomDirty, flushDirtyRooms, persistRoom, flushAllRoomsOnShutdown, roomsSnapshot, type CollabRoom } from './rooms.js';
 import { docJsonFromYRoom } from './roomDoc.js';
 import { plainTextOf, wordCountOf } from './docJson.js';
-import { MAX_ACTIVE_EDITORS, SEAT_REAPER_INTERVAL_MS, HEARTBEAT_INTERVAL_MS, COLLAB_CLOSE, ROOM_PERSIST_INTERVAL_MS } from './constants.js';
+import { MAX_ACTIVE_EDITORS, SEAT_REAPER_INTERVAL_MS, HEARTBEAT_INTERVAL_MS, COLLAB_CLOSE, ROOM_PERSIST_INTERVAL_MS, SERVER_SHUTDOWN_FLUSH_TIMEOUT_MS } from './constants.js';
+
+/** SHUTDOWN LATCH (§12): once true, no new join is accepted, no new seat
+ *  is acquired and no frame creates work — the graceful shutdown sequence
+ *  owns the process from here on (see shutdownCollabHub below). */
+let collabShuttingDown = false;
 
 /* ── socket-scoped state ─────────────────────────────────────────────────── */
 interface SocketCtx {
@@ -161,7 +167,16 @@ function leaveRoom(ws: WebSocket, ctx: SocketCtx): void {
 
 /* ── yjs doc change → persistence dirty marking ──────────────────────────── */
 function watchRoom(room: CollabRoom): void {
-  room.doc.on('update', () => markRoomDirty(room));
+  const marker = room as unknown as { _watched?: boolean };
+  if (marker._watched) return; /* ONE observer per room — no duplicate generation bumps */
+  marker._watched = true;
+  room.doc.on('update', () => {
+    /* DURABILITY: every canonical yjs mutation advances the monotonic
+       generation and marks the room dirty. Cost = one counter increment +
+       one boolean — never serialization, never Mongo (§22 hot-path rule). */
+    room.roomGeneration += 1;
+    markRoomDirty(room);
+  });
 }
 
 /* ── periodic jobs (reaper + persistence flush) ──────────────────────────── */
@@ -178,12 +193,32 @@ function startJobs(): void {
   }, SEAT_REAPER_INTERVAL_MS).unref();
 
   setInterval(() => {
-    void flushDirtyRooms(async (room) => {
-      const doc = docJsonFromYRoom(room);
-      if (!doc) return;
-      await persistRoom(room, doc, '', plainTextOf(doc), wordCountOf(doc));
-    });
+    if (collabShuttingDown) return; /* shutdown owns the final flush */
+    void flushDirtyRooms().then(() => broadcastPersistedRevisions());
   }, ROOM_PERSIST_INTERVAL_MS).unref();
+}
+
+/* ── PERSISTENCE ACKNOWLEDGEMENT (§10) ─────────────────────────────────
+   "synced to the room" and "durably persisted to Mongo" are DIFFERENT
+   states. After each flush cycle every room whose durable revision moved
+   gets ONE quiet `persisted` frame (noteId + revision + generation — no
+   timestamps, no content). Clients fold the revision into their autosave
+   baseRevision so the NEXT REST save cannot 409 against the room's own
+   write, and the SaveState indicator can honestly show durability. */
+const lastAckedRevision = new Map<string, number>();
+function broadcastPersistedRevisions(): void {
+  for (const room of roomsSnapshot()) {
+    if (room.durableGeneration === 0) continue;
+    const prev = lastAckedRevision.get(room.noteId) ?? 0;
+    if (room.persistedRevision <= prev) continue;
+    lastAckedRevision.set(room.noteId, room.persistedRevision);
+    const frame = JSON.stringify({ t: 'persisted', revision: room.persistedRevision, generation: room.durableGeneration });
+    for (const [ws, ctx] of sockets) {
+      if (ctx.noteId === room.noteId && ws.readyState === WebSocket.OPEN) {
+        try { ws.send(frame); } catch { /* ignore */ }
+      }
+    }
+  }
 }
 
 /* ── the WS upgrade path ─────────────────────────────────────────────────── */
@@ -223,9 +258,14 @@ function wireSocket(ws: WebSocket): void {
   ws.on('pong', () => { ctx.alive = true; });
 
   ws.on('message', (raw) => {
+    if (collabShuttingDown) return; /* no new work enters during shutdown */
     ctx.alive = true;
-    let msg: Record<string, unknown>;
-    try { msg = JSON.parse(String(raw)) as Record<string, unknown>; } catch { return; }
+    /* §28 PROTOCOL VALIDATION: every frame is parsed through the zod
+       schemas BEFORE dispatch — unknown types, wrong shapes, oversized
+       payloads and identity fields are dropped here, so a malformed frame
+       can never reach room state or crash the server. */
+    const msg = parseClientFrame(String(raw));
+    if (!msg) return; /* malformed → silent drop (never log content) */
     void handleFrame(ws, ctx, msg).catch((err) => {
       console.error('[collab] frame error', (err as Error)?.message);
     });
@@ -248,6 +288,18 @@ async function handleFrame(ws: WebSocket, ctx: SocketCtx, msg: Record<string, un
     case 'join': {
       const noteId = String(msg.noteId ?? '');
       if (!noteId || ctx.noteId) return;
+      if (collabShuttingDown) {
+        /* §12: refuse new joins during shutdown — the client's reconnect
+           backoff will find the (restarted) server afterwards */
+        ws.close(COLLAB_CLOSE.SERVER_SHUTDOWN, 'shutdown');
+        return;
+      }
+      if (collabShuttingDown) {
+        /* §12: refuse new joins during shutdown — the client's reconnect
+           backoff will find the (restarted) server afterwards */
+        ws.close(COLLAB_CLOSE.SERVER_SHUTDOWN, 'shutdown');
+        return;
+      }
       const access = await resolveCollabAccess(noteId, ctx.userId);
       if (!access.ok) {
         send(ws, { t: 'denied', reason: 'forbidden' });
@@ -266,6 +318,10 @@ async function handleFrame(ws: WebSocket, ctx: SocketCtx, msg: Record<string, un
          the old session's connectionId still points at the dead socket.) */
       let seat: 'active' | 'view' = 'view';
       let sessionId: string | null = null;
+      /** capacity denial issued DURING join (above) — the `joined` frame is
+       *  still sent (the client must receive the document), but the client
+       *  also gets `denied` first so its UI shows the real reason. */
+      let joinDenied: 'capacity' | null = null;
 
       /* user display metadata for presence — from the User doc, never from
          the client's claims */
@@ -298,6 +354,15 @@ async function handleFrame(ws: WebSocket, ctx: SocketCtx, msg: Record<string, un
               }
             }
           }
+        } else {
+          /* FULL ROOM (the 5th+ joiner — including the note's CREATOR who
+             merely arrived late): the join frame alone would leave the
+             client in an unexplained view-only state (no reason, no banner,
+             no retry). An explicit capacity denial lets the UI show the
+             honest «۴ نفر در حال ویرایش…» banner and auto-retry when a
+             seat frees up. The user stays fully connected for READ sync. */
+          joinDenied = 'capacity';
+          send(ws, { t: 'denied', reason: 'capacity' });
         }
       } else {
         /* authorized viewer without edit rights: read-only from the start */
@@ -325,6 +390,8 @@ async function handleFrame(ws: WebSocket, ctx: SocketCtx, msg: Record<string, un
 
     case 'acquire': {
       if (!ctx.noteId) return;
+      if (collabShuttingDown) { send(ws, { t: 'denied', reason: 'capacity' }); return; }
+      if (collabShuttingDown) { send(ws, { t: 'denied', reason: 'capacity' }); return; }
       const access = await resolveCollabAccess(ctx.noteId, ctx.userId);
       if (!access.ok) { send(ws, { t: 'revoked' }); return; }
       if (!access.canEdit) { send(ws, { t: 'denied', reason: 'forbidden' }); return; }
@@ -384,9 +451,18 @@ async function handleFrame(ws: WebSocket, ctx: SocketCtx, msg: Record<string, un
     case 'sync.step1': {
       const room = ctx.noteId ? getRoom(ctx.noteId) : null;
       if (!room) return;
-      /* reply with the room diff for the client's state vector */
-      const sv = unb64(msg.s64);
-      const diff = Y.encodeStateAsUpdate(room.doc, sv);
+      /* reply with the room diff for the client's state vector.
+         §19 HARDENING: a malformed/empty state vector must not throw into
+         the frame loop (yjs 'Unexpected end of array') — treat it as an
+         EMPTY vector, which is always a legal answer (full-diff request). */
+      let sv: Uint8Array<ArrayBuffer> = new Uint8Array();
+      try { sv = unb64(msg.s64) as Uint8Array<ArrayBuffer>; } catch { sv = new Uint8Array(); }
+      let diff: Uint8Array<ArrayBuffer>;
+      try {
+        diff = Y.encodeStateAsUpdate(room.doc, sv) as Uint8Array<ArrayBuffer>;
+      } catch {
+        diff = Y.encodeStateAsUpdate(room.doc) as Uint8Array<ArrayBuffer>; /* full state fallback */
+      }
       send(ws, { t: 'sync.step2', u64: b64(diff) });
       return;
     }
@@ -451,6 +527,12 @@ async function handleFrame(ws: WebSocket, ctx: SocketCtx, msg: Record<string, un
       if (!room) return;
       const doc = msg.doc as Record<string, unknown> | undefined;
       if (!doc || typeof doc !== 'object') return;
+      /* STALE-SNAPSHOT GUARD (§15/§16): the client payload is produced from
+         the client's local mirror — it may LAG the room's yjs state. A
+         pendingDoc that is older than the room can never be REPLACED by
+         one, and docJsonFromYRoom's preference for pendingDoc expires
+         with the generation that produced it (set below), so a quiescent
+         room always flushes its own canonical projection. */
       const projected = docJsonFromYRoom(room);
       if (projected) {
         const roomText = plainTextOf(projected);
@@ -461,9 +543,14 @@ async function handleFrame(ws: WebSocket, ctx: SocketCtx, msg: Record<string, un
           room.structure.set('pendingDoc', projected);
         } else {
           room.structure.set('pendingDoc', doc);
+          /* remember WHICH generation this submission reflects — the
+             projection falls back to the room's own state once the room
+             has moved past it (no stale-client shadow over newer room ops) */
+          room.structure.set('pendingDocGeneration', room.roomGeneration);
         }
       } else {
         room.structure.set('pendingDoc', doc);
+        room.structure.set('pendingDocGeneration', room.roomGeneration);
       }
       markRoomDirty(room);
       return;
@@ -513,3 +600,68 @@ setInterval(() => {
     try { ws.ping(); } catch { /* ignore */ }
   }
 }, HEARTBEAT_INTERVAL_MS).unref();
+
+/* ═══════════════════════════════════════════════════════════════════════
+   §12 GRACEFUL SHUTDOWN — the full collaboration lifecycle.
+   Called by server/src/index.ts on SIGTERM/SIGINT BEFORE Mongo closes.
+   Order matters:
+     1. latch ON → no new joins/frames create work (join is refused,
+        messages are dropped, seat acquisition is denied)
+     2. every socket is closed with SERVER_SHUTDOWN — clients keep their
+        local yjs state and reconnect to the restarted server later
+     3. dirty rooms flush ONCE (fresh snapshot per room), bounded by
+        SERVER_SHUTDOWN_FLUSH_TIMEOUT_MS — a dead Mongo cannot hang exit
+     4. awareness + room state are destroyed
+   Idempotent: a second call is a no-op (no duplicate shutdown execution).
+   ═════════════════════════════════════════════════════════════════════ */
+export async function shutdownCollabHub(): Promise<void> {
+  if (collabShuttingDown) return;
+  collabShuttingDown = true;
+  console.log(`[collab] shutdown: closing ${sockets.size} socket(s), flushing dirty rooms…`);
+  for (const [ws, ctx] of sockets) {
+    if (ctx.sessionId) sessionStore.release(ctx.sessionId);
+    try { ws.close(COLLAB_CLOSE.SERVER_SHUTDOWN, 'shutdown'); } catch { /* ignore */ }
+  }
+  sockets.clear();
+  await flushAllRoomsOnShutdown();
+  for (const [noteId, aw] of awarenessByRoom) {
+    try { aw.destroy(); } catch { /* ignore */ }
+    awarenessByRoom.delete(noteId);
+  }
+  console.log('[collab] shutdown: rooms destroyed, transport closed.');
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   §29 NOTE DELETION — server authority wins.
+   Called by the note routes when a collaborative note is deleted or
+   TRASHED while a room is live: every connected client is told explicitly
+   (note.deleted frame), every session lease is released, sockets are
+   closed with the NOTE_DELETED code, and the room is torn down so NO
+   further write (client autosave OR room persistence) can resurrect a
+   dead note. Trash uses the same path: a trashed note must not keep
+   accepting collaborative edits either. */
+export function handleCollabNoteRemoved(noteId: string, reason: 'deleted' | 'trashed' = 'deleted'): void {
+  const room = getRoom(noteId);
+  const frame = JSON.stringify({ t: 'note.deleted', reason });
+  for (const [ws, ctx] of sockets) {
+    if (ctx.noteId !== noteId) continue;
+    /* release the seat FIRST so the reaper/presence never counts a ghost */
+    if (ctx.sessionId) {
+      sessionStore.release(ctx.sessionId);
+      ctx.sessionId = null;
+      ctx.seat = 'view';
+    }
+    if (ws.readyState === WebSocket.OPEN) {
+      try { ws.send(frame); } catch { /* socket already dying */ }
+      try { ws.close(COLLAB_CLOSE.NOTE_DELETED, reason); } catch { /* ignore */ }
+    }
+  }
+  if (room) {
+    /* drop the room: no persistence flush may run against a removed note
+       (persistRoom already guards on trashed, but the room itself must not
+       linger holding Y.Doc memory + dirty flags) */
+    room.connections.clear();
+    destroyRoomIfIdle(noteId);
+    awarenessByRoom.delete(noteId);
+  }
+}

@@ -6,7 +6,7 @@ import { ApiRequestError } from '@/api/client';
 import { useApp } from '@/store/AppProvider';
 import { analyzeDocument, faDigits } from '@/utils/fa';
 import type { AIResult, Note, PageKind, SaveState, PageCoverAttrs } from '@/types';
-import { DEFAULT_BORDER_SETTINGS, type BorderSettings } from '@/types';
+import { DEFAULT_BORDER_SETTINGS, type BorderSettings, type EduBlocksSettings } from '@/types';
 import { Page as PageComponent, EMPTY_FLOATS_LIST, plainTextOf, type PageProps } from '@/components/editor/Page';
 import { PageSidebar } from '@/components/editor/PageSidebar';
 import { FloatingLayer, createFloatingElement, type FloatingElement } from '@/components/editor/FloatingLayer';
@@ -24,6 +24,7 @@ import { insertAIOutput } from '@/editor/aiInsert';
 import { objectMaxArea } from '@/editor/pageCapacity';
 import { flowEngineActiveRef } from '@/editor/flowEngineState';
 import { currentPaginationMode, onCapacityReject, runManualPageBreakSplit } from '@/editor/paginationMode';
+import { policyFor } from '@/editor/paginationPolicy';
 import { hasTrailingPageBreak } from '@/editor/overflowFlow';
 import { renderFormulasInHtml, renderEquationsInHtml } from '@/editor/extensions/blocks';
 
@@ -47,13 +48,17 @@ import { CollabPresenceChip, CollabBanner } from '@/components/editor/CollabPres
 import { wireDocObserver, seedPageFragmentFromJson, publishStructure } from '@/collab/editorSync';
 import type { CollabSession } from '@/collab/session';
 import { structureCreatePage, structureDeletePage, structureMovePage, structureUpdateKind, reconcilePagesFromStructure, pagesFromRestoredDoc } from '@/collab/structureSync';
-import { floatUpsert, floatPatch, floatDelete, floatDiff, reconcileFloatsFromSession } from '@/collab/floatSync';
+import { floatUpsert, floatPatch, floatDelete, floatDiff, reconcileFloatsFromSession, setProtectedFloat } from '@/collab/floatSync';
 import { publishTitle as collabPublishTitle, observeTitle } from '@/collab/metadataSync';
 import { pageJsonFromFragment } from '@/collab/editorSync';
 import { AutosaveScheduler, pendingNoteStore, pendingKey } from '@/save/persistence';
+/* §18 — .pnote native export + the «وارد کردن فایل» modal (pnote/pdf) */
+import { exportPnote } from '@/pnote/exportPnote';
+import { ImportFileModal, type ImportApplyInfo } from '@/components/editor/ImportFileModal';
 import type { PendingNoteSave } from '@/types';
 import { SaveStatusBadge } from '@/components/editor/SaveStatusBadge';
 import { docJsonToHtml } from '@/utils/staticSchema';
+import { copyPagesToClipboard } from '@/utils/copyPage';
 import { emitUserEvent } from '@/events/userEvents';
 import { ContextMenu, type MenuItem } from '@/editor/ribbon/contextual/contextMenu';
 import { buildContextMenuItems, detectRightClickTarget, type CtxMenuActions } from '@/editor/ribbon/contextual/contextMenuItems';
@@ -99,129 +104,31 @@ function emptyPage(): DocPage {
   };
 }
 
-/** Editor JSON and persisted decorative floating layers live in the same
- *  `content` object; split them so TipTap never sees the foreign key. */
-function splitContent(raw: Record<string, unknown>): { doc: Record<string, unknown>; floats: FloatingElement[] } {
-  const floats = Array.isArray(raw?.floatingElements) ? raw.floatingElements as FloatingElement[] : [];
-  const doc: Record<string, unknown> = { ...raw };
-  delete doc.floatingElements;
-  return { doc, floats };
+/* §4 page model as PURE functions — MOVED to utils/docPages.ts so the
+   .pnote serializer shares the ONE implementation (identical multi-page
+   semantics; logic unchanged). Re-imported here verbatim. */
+import { splitContent as splitContentPure, mergeContent as mergeContentPure, splitDocIntoPages as splitDocIntoPagesPure, mergePagesIntoDoc as mergePagesIntoDocPure } from '@/utils/docPages';
+
+function splitContent(raw: Record<string, unknown>): { doc: Record<string, unknown>; floats: FloatingElement[]; design?: Record<string, unknown> } {
+  const r = splitContentPure(raw);
+  return { doc: r.doc, floats: r.floats as unknown as FloatingElement[], design: r.design };
 }
 
-function mergeContent(doc: Record<string, unknown>, floats: FloatingElement[]): Record<string, unknown> {
-  return { ...doc, floatingElements: floats };
+function mergeContent(doc: Record<string, unknown>, floats: FloatingElement[], design?: Record<string, unknown>): Record<string, unknown> {
+  return mergeContentPure(doc, floats as unknown as Array<Record<string, unknown>>, design);
 }
 
-const PAGE_KINDS: PageKind[] = ['framed', 'blank', 'notebook', 'cover', 'toc', 'booklet'];
-function isPageKind(v: unknown): v is PageKind {
-  return typeof v === 'string' && (PAGE_KINDS as string[]).includes(v);
+/* §4 page model — splitDocIntoPages/mergePagesIntoDoc MOVED to
+   utils/docPages.ts (verbatim) so the .pnote serializer shares the ONE
+   implementation. Thin typed wrappers keep the DocPage shapes here. */
+function splitDocIntoPages(doc: Record<string, unknown> | null): Array<{ id?: string; content: Record<string, unknown>; kind: PageKind; auto: boolean; coverAttrs?: PageCoverAttrs; headerLabel?: string }> {
+  return splitDocIntoPagesPure(doc) as Array<{ id?: string; content: Record<string, unknown>; kind: PageKind; auto: boolean; coverAttrs?: PageCoverAttrs; headerLabel?: string }>;
 }
 
-/** Split a stored document JSON into per-page docs. A top-level `pageBreak`
- *  node marks a page boundary, so notes saved by the multi-page editor (and
- *  legacy single-sheet notes that used the pageBreak divider) reopen as real
- *  sibling pages instead of one giant clipped sheet. Each page's visual kind
- *  rides along: the FIRST page's kind is stored in the doc's `attrs.pageKind`,
- *  every following page's kind on the pageBreak node right before it. The
- *  pageBreak's `auto` attr marks sheets the pagination engine created.
- *
- *  COLLABORATION INVARIANT: page identity must be STABLE across clients and
- *  reloads — every editor binds its TipTap instance to the shared yjs
- *  fragment `page:<pageId>`, so two clients that load the same note must
- *  derive the SAME ids or their edits land in different fragments and never
- *  converge. Ids are therefore deterministic (`p1…pN`, the persisted
- *  pageBreak ordinal) and only NEW pages (created at runtime by the user)
- *  get random ids — which the merge below persists for the next load. */
-function splitDocIntoPages(doc: Record<string, unknown> | null): Array<{ id?: string; content: Record<string, unknown>; kind: PageKind; auto: boolean; cover?: PageCoverAttrs; headerLabel?: string }> {
-  const blocks = Array.isArray(doc?.content) ? (doc.content as Record<string, unknown>[]) : [];
-  const docAttrs = (doc?.attrs ?? {}) as Record<string, unknown>;
-  const firstKind: PageKind = isPageKind(docAttrs.pageKind) ? docAttrs.pageKind : 'framed';
-  const firstCover = docAttrs.pageCover as PageCoverAttrs | undefined;
-  const chunks: Array<{ id?: string; nodes: Record<string, unknown>[]; kind: PageKind; auto: boolean; cover?: PageCoverAttrs; headerLabel?: string }> = [{ id: 'p1', nodes: [], kind: firstKind, auto: false, cover: firstKind === 'cover' ? firstCover : undefined }];
-  let ordinal = 1;
-  for (const block of blocks) {
-    if (block?.type === 'pageBreak') {
-      const attrs = (block.attrs ?? {}) as Record<string, unknown>;
-      ordinal += 1;
-      chunks.push({ id: typeof attrs.pid === 'string' && attrs.pid ? attrs.pid : `p${ordinal}`, nodes: [], kind: isPageKind(attrs.kind) ? attrs.kind : 'framed', auto: attrs.auto === true, cover: (attrs.cover as PageCoverAttrs | undefined) ?? undefined, headerLabel: typeof attrs.headerLabel === 'string' ? attrs.headerLabel : undefined });
-      continue;
-    }
-    chunks[chunks.length - 1].nodes.push(block);
-  }
-  /* a trailing pageBreak must not produce an empty phantom page — EXCEPT
-     cover/toc sheets: they are intentionally content-free (the artwork or
-     the ruled index is a layer, not editor content). Dropping them here
-     deleted a last-page جلد/فهرست on every reload. */
-  const lastChunk = chunks[chunks.length - 1];
-  if (
-    chunks.length > 1 &&
-    lastChunk.nodes.length === 0 &&
-    lastChunk.kind !== 'cover' &&
-    lastChunk.kind !== 'toc'
-  ) {
-    chunks.pop();
-  }
-  return chunks.map((c) => ({
-    id: c.id,
-    kind: c.kind,
-    auto: c.auto,
-    coverAttrs: c.cover,
-    headerLabel: c.headerLabel,
-    content: {
-      type: 'doc',
-      content: c.nodes.length ? c.nodes : [{ type: 'paragraph' }],
-    },
-  }));
-}
-
-/** Merge all pages back into ONE stored document, with `pageBreak` nodes
- *  between them — keeps the persisted format backward-compatible with the
- *  pre-multi-page format (versions, print fallbacks, old clients).
- *  Each page's visual kind is persisted on the pageBreak node before it
- *  (and the first page's kind in the doc attrs) so بلنک/نوت‌بوکی sheets
- *  survive save → load. */
 function mergePagesIntoDoc(pages: DocPage[]): Record<string, unknown> {
-  const blocks: Record<string, unknown>[] = [];
-  pages.forEach((p) => {
-    if (blocks.length > 0) {
-      const attrs: Record<string, unknown> = {};
-      /* the stable page id rides the break (see splitDocIntoPages — collab
-         fragments are addressed by it; format stays backward-compatible:
-         old clients/servers just ignore the unknown attr) */
-      if (p.id) attrs.pid = p.id;
-      if (p.kind !== 'framed') attrs.kind = p.kind;
-      if (p.auto) attrs.auto = true;
-      /* per-page سربرگ override (smart range modal) rides the break like
-         kind — old clients ignore the unknown attr */
-      if (p.headerLabel !== undefined) attrs.headerLabel = p.headerLabel;
-      /* item 15: cover metadata rides the break so cover sheets survive
-         save → load (old clients ignore the unknown attr) */
-      if (p.coverAttrs) attrs.cover = p.coverAttrs;
-      blocks.push(Object.keys(attrs).length ? { type: 'pageBreak', attrs } : { type: 'pageBreak' });
-    }
-    const arr = Array.isArray(p.content?.content)
-      ? (p.content.content as Record<string, unknown>[])
-      : [];
-    /* inline pageBreak nodes are layout directives the flow engine consumes
-       into real page boundaries — they must NOT persist inside a page's own
-       content, or a trailing one would split the stored doc into a phantom
-       empty page on reload */
-    blocks.push(...arr.filter((n) => n?.type !== 'pageBreak'));
-  });
-  const firstKind = pages[0]?.kind ?? 'framed';
-  const doc: Record<string, unknown> = {
-    type: 'doc',
-    content: blocks.length ? blocks : [{ type: 'paragraph' }],
-  };
-  if (firstKind !== 'framed') doc.attrs = { pageKind: firstKind };
-  /* item 15: the FIRST page has no pageBreak before it — its cover metadata
-     must ride the DOC attrs or the first cover sheet loses its artwork on
-     every save → load round-trip */
-  if (firstKind === 'cover' && pages[0]?.coverAttrs) {
-    doc.attrs = { ...(doc.attrs as Record<string, unknown> ?? {}), pageCover: pages[0]!.coverAttrs };
-  }
-  return doc;
+  return mergePagesIntoDocPure(pages);
 }
+
 
 /** Build a page entry. `id` comes from splitDocIntoPages when loading
  *  (STABLE — collaboration fragments are addressed by it); only pages
@@ -366,15 +273,37 @@ export default function EditorPage() {
      when the current doc hasn't produced anything yet (e.g. right after load). */
   const [html, setHtml] = useState('');
   /* document-level design state edited from the Ribbon's طراحی/چیدمان tabs —
-     border is the real persisted BorderSettings used by PageBorder + PDF */
+     border is the real persisted BorderSettings used by PageBorder + PDF.
+     PER-NOTE (user report: «تنظیمات یک جزوه روی بقیه اعمال می‌شود»): the
+     design lives in the NOTE's content.noteDesign — the user's global
+     settings are only the SEED for notes that have none yet. Changing a
+     frame color here must never touch the user settings doc. */
   const [zoom, setZoom] = useState(1);
+  /* null until the note loads → fall back to the global settings during
+     that first paint (no flash of default design on load) */
+  const [noteDesign, setNoteDesign] = useState<{ border?: Partial<BorderSettings>; eduBlocks?: EduBlocksSettings } | null>(null);
   const border = useMemo<BorderSettings>(
-    () => ({ ...DEFAULT_BORDER_SETTINGS, ...(settings?.border ?? {}) }),
-    [settings?.border]
+    () => ({ ...DEFAULT_BORDER_SETTINGS, ...(noteDesign?.border ?? settings?.border ?? {}) }),
+    [noteDesign?.border, settings?.border]
   );
+  /* design changes mark the NOTE dirty → the normal autosave path persists
+     them inside content.noteDesign (per-note, versioned, undoable-ish).
+     The scheduler is declared further down (§§ centralized autosave) — call
+     through a ref to keep this hoistable above it. */
+  const schedulerEarlyRef = useRef<{ markDirty(): void } | null>(null);
+  const markDesignDirty = useCallback(() => {
+    dirtyRef.current = true;
+    schedulerEarlyRef.current?.markDirty();
+  }, []);
   const patchBorder = useCallback(
-    (patch: Partial<BorderSettings>) => { void saveSettings({ border: { ...border, ...patch } }); },
-    [border, saveSettings]
+    (patch: Partial<BorderSettings>) => {
+      setNoteDesign((prev) => {
+        const base = prev?.border ?? settings?.border ?? {};
+        return { ...(prev ?? {}), border: { ...base, ...patch } };
+      });
+      markDesignDirty();
+    },
+    [settings?.border, markDesignDirty]
   );
 
   /* ── کادرهای آموزشی: resolved settings + generated live CSS ──────────
@@ -382,8 +311,17 @@ export default function EditorPage() {
      stylesheet injected over the document pages — the SAME generator feeds
      the print/PDF export, so the PDF always matches the editor. */
   const eduBlocks = useMemo(
-    () => resolveEduBlocks(settings?.editor.eduBlocks) ?? DEFAULT_EDU_BLOCKS,
-    [settings?.editor.eduBlocks]
+    () => resolveEduBlocks(noteDesign?.eduBlocks ?? settings?.editor.eduBlocks) ?? DEFAULT_EDU_BLOCKS,
+    [noteDesign?.eduBlocks, settings?.editor.eduBlocks]
+  );
+  /** per-note eduBlocks save (EduBlocksModal → saveEduBlocks is re-pointed
+   *  here) — writes the NOTE design, never the user's global settings */
+  const patchNoteEduBlocks = useCallback(
+    (edu: EduBlocksSettings) => {
+      setNoteDesign((prev) => ({ ...(prev ?? {}), eduBlocks: edu }));
+      markDesignDirty();
+    },
+    [markDesignDirty]
   );
   const eduCss = useMemo(
     () => [
@@ -502,6 +440,10 @@ export default function EditorPage() {
   favoriteRef.current = favorite;
   const floatsByPageRef = useRef(floatingElementsByPage);
   floatsByPageRef.current = floatingElementsByPage;
+  /* live mirror of the per-note design — the scheduler's buildPayload reads
+     it at flush time (no stale-closure risk, no callback churn) */
+  const noteDesignRef = useRef<Record<string, unknown> | null>(null);
+  noteDesignRef.current = noteDesign && Object.keys(noteDesign).length > 0 ? noteDesign : null;
   const saveInFlightRef = useRef(false);
 
   /* ── Centralized autosave scheduler (save/persistence.ts) ────────────
@@ -538,7 +480,7 @@ export default function EditorPage() {
           title: titleRef.current.trim() || 'Untitled note',
           subjectId: subjectIdRef.current || null,
           chapter: chapterRef.current,
-          content: mergeContent(merged, mergedPages.flatMap((p) => p.floatingElements)),
+          content: mergeContent(merged, mergedPages.flatMap((p) => p.floatingElements), noteDesignRef.current ?? undefined),
           html: buildFullHtmlRef.current(),
           plainText: plainParts.join(' '),
           tags: noteTagsRef.current,
@@ -574,6 +516,9 @@ export default function EditorPage() {
     });
   }
   const scheduler = schedulerRef.current;
+  /* the design patchers (declared above the scheduler) mark the note dirty
+     through this ref — now that the scheduler exists, point it at them */
+  schedulerEarlyRef.current = scheduler;
   /* conflict handler installed after the scheduler exists — send() resolves
      it through this ref (defined before the scheduler in deps closure) */
   const conflictRetryRef = useRef<(serverRevision: number) => void>(() => {});
@@ -767,10 +712,22 @@ export default function EditorPage() {
       const ed = pageEditorsRef.current[p.id];
       if (!ed || ed.state.doc.childCount < 2) continue;
       if (!isOverflowing(ed)) continue;
+      /* keep at least the leading CONTAINER FRAME on this page — only the
+         overflow tail (inner blocks) flows forward. Previously the fallback
+         could put frame+ALL children on the next page: the frame measured
+         alone under the sheet minimum (`.edu-block { min-height }`) and
+         isOverflowing stayed true → the fallback re-fired forever, ticking
+         through every remaining block (the «متن بزور میره تو باکس/صفحه
+         بعد» cascade) until the box was fully evacuated.
+         Page-level wrappers (pageBreak) still yield the WHOLE node. */
+      const firstChild = ed.state.doc.child(0);
+      const policy = policyFor(firstChild);
+      const cutIndex = policy.break === 'container' && !policy.selfBreak ? 1 : 0;
+      if (ed.state.doc.childCount <= cutIndex + 1) continue;
       const secondStart = ed.state.doc.child(0).nodeSize;
       const nodes: Record<string, unknown>[] = [];
       ed.state.doc.forEach((n: any, _o: number, index: number) => {
-        if (index >= 1) nodes.push(n.toJSON());
+        if (index >= Math.max(1, cutIndex)) nodes.push(n.toJSON());
       });
       if (!nodes.length) continue;
       return {
@@ -1371,12 +1328,31 @@ export default function EditorPage() {
         setNoteTags((n.tags as Array<{ _id: string }>).map((t) => t._id));
         setFavorite(n.favorite);
         const { doc: loadedDoc, floats: loadedFloats } = splitContent(n.content as Record<string, unknown>);
+        /* PER-NOTE design: the note's own design (content.noteDesign) wins;
+           a note saved BEFORE this field existed seeds itself ONCE from the
+           user's current global design so the transition is invisible */
+        const loadedDesign = (n.content as Record<string, unknown>)?.noteDesign as { border?: Partial<BorderSettings>; eduBlocks?: EduBlocksSettings } | undefined;
+        const seededDesign: { border?: Partial<BorderSettings>; eduBlocks?: EduBlocksSettings } = loadedDesign ?? {};
+        if (!loadedDesign) {
+          if (settings?.border) seededDesign.border = settings.border;
+          /* legacy string values ('minimal'/'tinted') resolve to the full
+             object via resolveEduBlocks — never store the raw string */
+          const eb = settings?.editor.eduBlocks;
+          if (eb) seededDesign.eduBlocks = resolveEduBlocks(eb) ?? DEFAULT_EDU_BLOCKS;
+        }
+        setNoteDesign(seededDesign);
         /* one real sibling page per stored pageBreak section — a multi-page
            note reopens as multiple A4 sheets, not one giant clipped page */
         const loadedPages: DocPage[] = splitDocIntoPages(loadedDoc)
           /* coverAttrs MUST ride along (item 15) — dropping it here wiped
-             every cover/toc sheet the moment the note was reloaded */
-          .map((c, i) => makePage(i, c.content, i === 0 ? loadedFloats : [], c.kind, c.auto, c.id, c.cover, c.headerLabel));
+             every cover/toc sheet the moment the note was reloaded.
+             BUGFIX («برگشتم جزوه رو ادامه بدم، صفحات جلد سفید بودن»):
+             splitDocIntoPages returns the field as `coverAttrs` — reading
+             `c.cover` here passed undefined for EVERY page, so covers
+             loaded as kind=cover with NO artwork (white sheet with only
+             the empty frame) and the white sheets then propagated into
+             .pnote exports. Field name is `coverAttrs`. */
+          .map((c, i) => makePage(i, c.content, i === 0 ? loadedFloats : [], c.kind, c.auto, c.id, c.coverAttrs, c.headerLabel));
         setPages(loadedPages);
         setActivePageId(loadedPages[0].id);
         setFloatingElementsByPage(Object.fromEntries(loadedPages.map((p) => [p.id, p.floatingElements])));
@@ -1392,7 +1368,7 @@ export default function EditorPage() {
             if (pendingJson && new Date(p.updatedAt) > new Date(n.updatedAt)) {
               const { doc: pendingDoc, floats: pendingFloats } = splitContent(pendingJson as Record<string, unknown>);
               const pendingPages: DocPage[] = splitDocIntoPages(pendingDoc)
-                .map((c, i) => makePage(i, c.content, i === 0 ? pendingFloats : [], c.kind, c.auto, c.id, c.cover, c.headerLabel));
+                .map((c, i) => makePage(i, c.content, i === 0 ? pendingFloats : [], c.kind, c.auto, c.id, c.coverAttrs, c.headerLabel));
               setPages(pendingPages);
               setActivePageId(pendingPages[0].id);
               setFloatingElementsByPage(Object.fromEntries(pendingPages.map((pg) => [pg.id, pg.floatingElements])));
@@ -1500,7 +1476,11 @@ export default function EditorPage() {
           if (np) { activePageIdRef.current = np.id; setActivePageId(np.id); }
         }
       }
-      for (const p of pagesRef.current) {
+      /* float merge runs against the NEW page list when the structure just
+         changed — a remote CREATE_PAGE that arrives in the same transaction
+         as its float upserts would otherwise be skipped for one tick
+         (pagesRef still lags setPages until the next render). */
+      for (const p of (nextPages ?? pagesRef.current)) {
         const local = (floatsByPageRef.current[p.id] ?? []) as unknown as Array<Record<string, unknown>>;
         const merged = reconcileFloatsFromSession(s, p.id, local);
         if (merged) {
@@ -1535,7 +1515,11 @@ export default function EditorPage() {
 
   /* collaborative metadata: TITLE (§13) — remote edits mirror into local
      state WITHOUT autosave (the room persists the title itself); local
-     typing is never stomped (skip while the title input is focused) */
+     typing is never stomped (skip while the title input is focused).
+     OUTBOUND (§13 wire-up): local title edits publish into the room — the
+     session is seat-gated (publishTitle is a no-op without an ACTIVE seat)
+     and the Y.Map equality check makes repeated keystrokes on the same
+     value free. Remote echo of OUR OWN value is a no-op (t === current). */
   useEffect(() => {
     if (!collabSession) return;
     return observeTitle(collabSession, (t) => {
@@ -1621,7 +1605,7 @@ export default function EditorPage() {
       title: titleRef.current.trim() || 'Untitled note',
       subjectId: subjectIdRef.current || null,
       chapter: chapterRef.current,
-      content: mergeContent(merged, mergedPages.flatMap((p) => p.floatingElements)),
+      content: mergeContent(merged, mergedPages.flatMap((p) => p.floatingElements), noteDesignRef.current ?? undefined),
       html: buildFullHtml(),
       plainText: plainParts.join(' '),
       tags: noteTagsRef.current,
@@ -1637,6 +1621,20 @@ export default function EditorPage() {
      canonical persistence path with baseRevision/409 semantics intact. */
   const buildPayloadRef = useRef(schedulerBuildPayload);
   buildPayloadRef.current = schedulerBuildPayload;
+  useEffect(() => {
+    if (!collabSession || !collabActive) return;
+    /* §10/§11 PERSISTENCE ACK → ONE SaveState: when the server acks a
+       DURABLE room flush, its server-side revision becomes the autosave
+       scheduler's baseRevision. The room's Mongo writes therefore never
+       blindside the client's REST saves into a 409 — the scheduler simply
+       knows the note advanced. No second save indicator is introduced;
+       SaveState remains the single authority (the room feed keeps it
+       honest: a room-acked save shows as advanced, not dirty-by-magic). */
+    collabSession.onPersisted = (revision) => {
+      scheduler.setBaseRevision(revision);
+    };
+    return () => { collabSession.onPersisted = null; };
+  }, [collabSession, scheduler]);
   useEffect(() => {
     if (!collabSession || !collabActive) return;
     if (collabState?.seat !== 'active') return;
@@ -1660,6 +1658,19 @@ export default function EditorPage() {
      on the hot path is one boolean + one state transition — no
      serialization, no network, no closures recreated. */
   const debouncedSave = useCallback(() => { scheduler.markDirty(); }, [scheduler]);
+
+  /* §13 title wire-up: local title edits publish into the room's metadata
+     map (seat-gated in the session; publishTitle is a no-op without an
+     ACTIVE seat and the Y.Map equality check makes same-value keystrokes
+     free). The room persists the title itself (pendingTitle → persistRoom),
+     so no version snapshot fires per keystroke and a reconnect re-observes
+     the latest value (§18/§19 — nothing is lost). Remote echo of our own
+     value is a no-op (observeTitle filters t === current). */
+  const handleTitleChange = useCallback((t: string) => {
+    setTitle(t);
+    debouncedSave();
+    collabPublishTitle(collabSessionRef.current, t);
+  }, [debouncedSave]);
 
   const save = useCallback(async (versionReason?: string) => {
     if (!noteRef.current) return;
@@ -1854,6 +1865,12 @@ export default function EditorPage() {
   const liveFloatGeometryRef = useRef<{ pageId: string; id: string; x: number; y: number; width: number; height: number } | null>(null);
   const handleLiveFloatGeometry = useCallback((pgId: string, id: string, g: { x: number; y: number; width: number; height: number } | null) => {
     liveFloatGeometryRef.current = g ? { pageId: pgId, id, ...g } : null;
+    /* §23 DRAG POLICY: while THIS tab gestures an object, remote float
+       commits for THAT object are skipped (local interaction wins — the
+       pointerup commit republishes final geometry and canonical state
+       converges). setProtectedFloat(null) on gesture end re-opens the
+       reconcile; never a permanent divergence. */
+    setProtectedFloat(g ? pgId : null, g ? id : null);
   }, []);
   /* originating page of the OPEN context menu (captured when the menu is
      built from the right-clicked page, consumed by its menu actions) */
@@ -1874,6 +1891,115 @@ export default function EditorPage() {
     const blob = new Blob([`<!doctype html><html dir="rtl" lang="fa"><head><meta charset="utf-8"><title>${title}</title><link href="https://cdn.jsdelivr.net/gh/rastikerdar/sahel-font@v3.4.0/dist/font-face.css" rel="stylesheet"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"><style>${fontsCssRaw}</style><style>body{font-family:Sahel,Tahoma;direction:rtl;max-width:800px;margin:2rem auto;line-height:2;padding:0 1rem}</style></head><body>${finalHtml}</body></html>`], { type: 'text/html;charset=utf-8' });
     downloadBlob(blob, `${title || 'note'}.html`);
   };
+
+  /* ══ خروجی Persian Notes (.pnote) — §18: the NATIVE lossless package ══
+     One snapshot of the §4 document (the EXACT object autosave persists,
+     floats + noteDesign included) → serializer → download. PDF/Word/HTML
+     exports remain untouched — .pnote is an ADDITIONAL format. */
+  const exportPnoteFile = async () => {
+    try {
+      const pagesNow = pagesRef.current.map((p) => {
+        const floats = floatsByPageRef.current[p.id];
+        return floats && floats !== p.floatingElements ? { ...p, floatingElements: floats } : p;
+      });
+      const merged = mergePagesIntoDoc(pagesNow);
+      const content = mergeContent(merged, pagesNow.flatMap((p) => p.floatingElements), noteDesignRef.current ?? undefined);
+      const result = await exportPnote({ content, title });
+      downloadBlob(new Blob([result.bytes as BlobPart], { type: 'application/zip' }), result.fileName);
+      toast('فایل .pnote آماده شد — نسخهٔ کامل و قابل بازیابی جزوه.', 'success');
+    } catch (e) {
+      toast('خروجی .pnote ناموفق بود: ' + (e as Error).message, 'error');
+    }
+  };
+
+  /* ══ وارد کردن فایل (.pnote / .pdf) — §7/§8/§10 ══
+     The modal owns parsing/validation; THIS host owns the commit:
+     • asNewNote → create a normal Note via notesApi.create and navigate
+       (the /editor/:id route loads it through the EXISTING pipeline —
+       the imported doc never bypasses validation/persistence)
+     • replace → the §4 document takes over the CURRENT note through the
+       same state paths a version restore uses; one autosave commits it
+       (single bounded operation — §23/§24). Collab: structure ops +
+       fragment seeds + float upserts ride the EXISTING room ops — the
+       binary package itself never travels through yjs. */
+  const [importOpen, setImportOpen] = useState(false);
+  const applyImport = useCallback(async (info: ImportApplyInfo) => {
+    try {
+      const { doc: loadedDoc, floats: loadedFloats, design } = splitContent(info.document);
+      /* BUGFIX («۲ صفحه خروجی گرفتم، صفحهٔ اول خالی ایمپورت شد»): imported
+         pages must NEVER keep the package's page ids. Every note's first
+         page is `p1` — and EditorPage does NOT remount between notes
+         (App.tsx mounts it per ROUTE) while Page keys by page.id and builds
+         its TipTap editor ONCE from mount-time content. The incoming `p1`
+         collided with the previous note's still-mounted p1 editor: the
+         imported content WAS committed to state, but the live editor kept
+         rendering the old (empty) document — page 1 appeared blank while
+         page 2 (a fresh key) remounted correctly. Fresh unique ids give
+         every page a brand-new React key → every sheet remounts with its
+         imported content. Nothing in merge/split depends on package ids. */
+      const freshImportId = () => {
+        let id: string;
+        do { id = `imp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`; }
+        while (pagesRef.current.some((p) => p.id === id));
+        return id;
+      };
+      const pagesToApply: DocPage[] = splitDocIntoPages(loadedDoc)
+        .map((c, i) => makePage(i, c.content, i === 0 ? (loadedFloats as unknown as FloatingElement[]) : [], c.kind, c.auto, freshImportId(), c.coverAttrs, c.headerLabel));
+      if (info.asNewNote || !noteRef.current) {
+        /* NEW NOTE — the existing creation pipeline, one create call */
+        const merged = mergePagesIntoDoc(pagesToApply);
+        const stored = mergeContent(merged, pagesToApply.flatMap((p) => p.floatingElements), (design as Record<string, unknown> | undefined));
+        let wordCount = 0;
+        for (const p of pagesToApply) wordCount += analyzeDocument(p.content ?? {}).wordCount;
+        const { note: created } = await notesApi.create({
+          title: info.title || 'جزوهٔ وارد شده',
+          content: stored,
+          wordCount,
+          html: '',
+          plainText: pagesToApply.map((p) => plainTextOf(p.content ?? {})).join(' '),
+        });
+        toast(info.kind === 'pnote' ? 'جزوه با موفقیت بازیابی شد.' : 'محتوای PDF وارد شد.', 'success');
+        navigate(`/editor/${created._id}`);
+        return;
+      }
+      /* REPLACE current content — explicit confirmation already given in
+         the modal. Pages carry FRESH ids (see above): no collision with the
+         still-mounted editors or the live room structure is possible. */
+      setPages(pagesToApply);
+      setActivePageId(pagesToApply[0].id);
+      setFloatingElementsByPage(Object.fromEntries(pagesToApply.map((p) => [p.id, p.floatingElements])));
+      if (info.title) setTitle(info.title);
+      if (design && Object.keys(design).length > 0) {
+        setNoteDesign({ ...(design as { border?: Partial<BorderSettings>; eduBlocks?: EduBlocksSettings }) });
+      }
+      dirtyRef.current = true;
+      scheduler.markDirty();
+      /* collab (only with a live ACTIVE seat): semantic structure ops +
+         content seeds + float upserts through the EXISTING ops */
+      const s = collabSessionRef.current;
+      if (s && collabSeatRef.current === 'active') {
+        /* old room page ids — deleted LAST, after the new chain exists
+           (creation anchors reference the previous page; deleting earlier
+           would also pull fragments out from under stale editors before
+           their replacements mount). opDeletePage wipes order+meta+fragment
+           +floats per id, so the old p1 fragment a stale editor could still
+           hold is emptied by the room itself. */
+        const oldRoomIds = pagesRef.current.map((p) => p.id);
+        pagesToApply.forEach((p, i) => {
+          structureCreatePage(s, p.id, p.kind, p.auto ?? false, i === 0 ? undefined : pagesToApply[i - 1].id);
+          seedPageFragmentFromJson(s, p.id, p.content as Record<string, unknown>);
+          for (const f of p.floatingElements) s.opUpsertFloat(p.id, f as unknown as Record<string, unknown>);
+          s.commitFloats(p.id, p.floatingElements as unknown as Array<Record<string, unknown>>);
+        });
+        for (const oid of oldRoomIds) {
+          if (!pagesToApply.some((p) => p.id === oid)) structureDeletePage(s, oid);
+        }
+      }
+      toast(info.kind === 'pnote' ? 'جزوه با موفقیت بازیابی شد.' : 'محتوای PDF وارد شد.', 'success');
+    } catch (e) {
+      toast('وارد کردن فایل ناموفق بود: ' + (e as Error).message, 'error');
+    }
+  }, [scheduler, navigate, toast]);
   const exportWord = async () => {
     try {
       /* the Word path takes the RAW editor HTML (LaTeX sources still
@@ -1896,11 +2022,13 @@ export default function EditorPage() {
         bodyFontFamily: settings?.editor.fontFamily,
         fontSizePx: settings?.editor.fontSize,
         lineHeight: settings?.editor.lineHeight,
-        eduCss: buildWordEduCss(settings?.editor.eduBlocks, (settings?.editor.eduBlocks ?? 'minimal') === 'tinted'),
+        eduCss: buildWordEduCss(eduBlocks, isTinted(eduBlocks)),
         /* ornamental page frame (قاب) → VML in the Word page header, page
            number → a real PAGE field in the footer: both repeat on every
-           page just like the editor sheet and the PDF */
-        ...buildWordHeaderFooter(settings?.border, { subject: subjects.find((s) => s._id === subjectId)?.name, chapter, title: title || 'Untitled' }),
+           page just like the editor sheet and the PDF.
+           PER-NOTE: the frame rides the note's own design, not the user's
+           global settings. */
+        ...buildWordHeaderFooter(border, { subject: subjects.find((s) => s._id === subjectId)?.name, chapter, title: title || 'Untitled' }),
       });
       downloadBlob(blob, `${title || 'note'}.doc`); toast('فایل Word آماده شد.', 'success');
     } catch (e) { toast('خروجی Word ناموفق بود: ' + (e as Error).message, 'error'); }
@@ -2038,7 +2166,12 @@ export default function EditorPage() {
   /** add a page of a specific visual kind (بلنک بدون قاب / نوت‌بوکی خط‌دار) */
   const addPageOfKind = useCallback((kind: PageKind) => {
     const pagesNow = pagesRef.current;
-    return createPage(activePageIdRef.current || pagesNow[pagesNow.length - 1]?.id || '', undefined, undefined, kind);
+    const newId = createPage(activePageIdRef.current || pagesNow[pagesNow.length - 1]?.id || '', undefined, undefined, kind);
+    /* the + picker creates a page whose editor mounts LATER — hand the
+       caret over (polled focus) or the next keystrokes stay on the old page */
+    focusPageEditorRef.current(newId);
+    scrollToPageEl(newId);
+    return newId;
   }, [createPage]);
 
   /** change the ACTIVE page's visual kind in place (قالب tab → نوع قاب:
@@ -2155,13 +2288,57 @@ export default function EditorPage() {
   /* ── Pages sidebar (thumbnail strip) handlers ─────────────────────── */
   const scrollToPageEl = (pageId: string) => {
     setTimeout(() => {
-      document.querySelector(`[data-page-id="${pageId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      /* the page-ID attr is SHARED by the sidebar item (`.pn-page-item`) and
+         the real sheet (`.page-paper`) — a bare querySelector hits the
+         sidebar's item first, so the editor column never scrolled (user
+         report: clicking a thumbnail didn't jump to that page). Scope to
+         the real sheet, and skip the sidebar's own thumb clones. */
+      const sheet = document.querySelector(`main .page-paper[data-page-id="${pageId}"]:not(aside .page-paper)`)
+        ?? document.querySelectorAll(`.page-paper[data-page-id="${pageId}"]`)[0];
+      sheet?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 60);
   };
+  /** focus the TARGET page's editor and move the caret there — clicking a
+   *  thumbnail must hand over the EDITOR, not just highlight the thumb:
+   *  setActivePageId alone re-renders and repoints editorRef, but the
+   *  browser focus/caret stay on the previously typed-in page, so typing
+   *  after navigation kept editing the OLD page (user report). The target
+   *  editor may not be registered YET (fresh page: React must mount the
+   *  sheet before useEditor registers it in pageEditorsRef) — poll briefly
+   *  instead of a single rAF that always fires too early. */
+  /** earlier callbacks (addPageOfKind) list this in deps before the const
+   *  below is declared — call through a ref, always the latest instance */
+  const focusPageEditorRef = useRef((pageId: string) => {});
+  const focusPageEditor = useCallback((pageId: string) => {
+    let tries = 0;
+    const attempt = () => {
+      const ed = pageEditorsRef.current[pageId];
+      if (ed && !ed.isDestroyed) {
+        try { ed.commands.focus('end'); } catch { /* editor mid-teardown */ }
+        return;
+      }
+      if (++tries <= 30) setTimeout(attempt, 40); // ~1.2s budget — never loop forever
+    };
+    attempt();
+  }, []);
+  focusPageEditorRef.current = focusPageEditor;
   const selectPageFromSidebar = useCallback((pageId: string) => {
+    if (pageId === activePageIdRef.current) { scrollToPageEl(pageId); focusPageEditor(pageId); return; }
+    activePageIdRef.current = pageId; // sync refs synchronously — the effect below also runs
+    pendingFlowSelectionRef.current = null; // never let a queued engine caret fight the user's pick
     setActivePageId(pageId);
     scrollToPageEl(pageId);
-  }, []);
+    focusPageEditor(pageId);
+  }, [focusPageEditor]);
+  /* add-page sidebar flow: the new editor mounts with the caret still on
+     the OLD page — the user's next keystrokes would land there (observed:
+     PAGE-ONE/TWO/THREE all typed into p1). Focus the new page as soon as
+     its editor registers, then scroll the sheet into view. */
+  const addPageFromSidebar = useCallback((afterId?: string, kind?: PageKind) => {
+    const newId = createPage(afterId || activePageIdStableRef.current || lastPageIdRef.current || '', undefined, undefined, kind);
+    focusPageEditor(newId);
+    scrollToPageEl(newId);
+  }, [createPage, focusPageEditor]);
   /* stable across keystrokes: reads pages via a ref inside the closure */
   const pagesLenRef = useRef(0);
   pagesLenRef.current = pages.length;
@@ -2169,10 +2346,6 @@ export default function EditorPage() {
   lastPageIdRef.current = pages[pages.length - 1]?.id ?? '';
   const activePageIdStableRef = useRef(activePageId);
   activePageIdStableRef.current = activePageId;
-  const addPageFromSidebar = useCallback((afterId?: string, kind?: PageKind) => {
-    const newId = createPage(afterId || activePageIdStableRef.current || lastPageIdRef.current || '', undefined, undefined, kind);
-    scrollToPageEl(newId);
-  }, [createPage]);
   const duplicatePage = useCallback((pageId: string) => {
     const src = pagesRef.current.find((p) => p.id === pageId);
     if (!src) return;
@@ -2221,6 +2394,55 @@ export default function EditorPage() {
     setPrintOpen(true);
   }, [pages, floatingElementsByPage]);
 
+  /* ── کپی صفحهٔ فعال با استایل و آیتم‌ها (user request) ─────────────────
+     Ctrl+C only copies the SELECTED TEXT — the قاب, notebook ruling, edu
+     styling, floating objects and the page number were lost. This builds
+     the SAME ExportPage snapshot the print pipeline renders (buildPagesHtml
+     + printCss) for the ACTIVE page and writes it to the clipboard as
+     text/html + text/plain: pasting into Word/Telegram/another note tab
+     restores the full styled sheet. */
+  const copyActivePage = useCallback(async () => {
+    const pid = activePageIdRef.current || pages[0]?.id;
+    const page = pages.find((p) => p.id === pid);
+    if (!page) { toast('صفحه‌ای برای کپی نیست.', 'error'); return; }
+    const snapshot: ExportPage = {
+      id: page.id,
+      html: pageEditorsRef.current[page.id]?.getHTML?.() ?? pageHtmlRef.current[page.id] ?? '',
+      floatingElements: floatingElementsByPage[page.id] ?? [],
+      kind: page.kind,
+      cover: page.kind === 'cover' && page.coverAttrs
+        ? { coverSrc: page.coverAttrs.coverSrc, coverFit: page.coverAttrs.coverFit, coverTitle: page.coverAttrs.coverTitle, coverSubtitle: page.coverAttrs.coverSubtitle }
+        : undefined,
+    };
+    const pageNumber = pages.findIndex((p) => p.id === page.id) + 1;
+    try {
+      const flavor = await copyPagesToClipboard({
+        pages: pages.map((p) => ({
+          id: p.id,
+          html: p.id === page.id
+            ? snapshot.html
+            : (pageEditorsRef.current[p.id]?.getHTML?.() ?? pageHtmlRef.current[p.id] ?? ''),
+          floatingElements: floatingElementsByPage[p.id] ?? [],
+          kind: p.kind,
+        })),
+        meta: { title: title || 'Untitled', subject: subjects.find((sp) => sp._id === subjectId)?.name, chapter },
+        settings: {
+          border,
+          fontSize: editorFontSize,
+          lineHeight: editorLineHeight,
+          eduTinted: isTinted(eduBlocks),
+          eduBlocks: resolveEduBlocks(eduBlocks) ?? undefined,
+        },
+        pageNumbers: [pageNumber],
+      });
+      if (flavor === 'html') toast(`صفحهٔ ${faDigits(pageNumber)} با استایل و آیتم‌ها کپی شد.`, 'success');
+      else if (flavor === 'plain') toast('متن صفحه کپی شد (مرورگر اجازهٔ کپی قالب نداد).', 'info');
+      else toast('کپی ناموفق بود.', 'error');
+    } catch (e) {
+      toast('کپی صفحه ناموفق بود: ' + (e as Error).message, 'error');
+    }
+  }, [pages, floatingElementsByPage, title, subjectId, subjects, chapter, border, editorFontSize, editorLineHeight, eduBlocks, toast]);
+
   /* ── host actions for the custom context menu ──────────────────────────
      The menu items forward to the SAME systems this page uses:
      • افزودن به یادداشت → the notes API (a new note carrying the text)
@@ -2251,7 +2473,8 @@ export default function EditorPage() {
     openFind: () => window.dispatchEvent(new CustomEvent('pn:open-find')),
     openReplace: () => window.dispatchEvent(new CustomEvent('pn:open-find', { detail: { replace: true } })),
     addFloating: (type) => addFloatingElement(type, undefined, ctxOriginPageIdRef.current),
-  }), [title, toast, addFloatingElement]);
+    copyActivePage: () => void copyActivePage(),
+  }), [title, toast, addFloatingElement, copyActivePage]);
 
   /* horizontal quick-format bar: shown as a card DIRECTLY ABOVE the vertical
      menu ONLY when a real text selection exists (formatting + بازنویسی AI
@@ -2276,6 +2499,17 @@ export default function EditorPage() {
 
   const activePage = useMemo(() => pages.find((p) => p.id === activePageId) ?? pages[0], [pages, activePageId]);
   const outline = useMemo(() => analyzeDocument(activePage?.content ?? {}), [activePage?.content]);
+  /* §7: does the CURRENT note already carry real content? — decides whether
+     the import modal offers the (explicitly confirmed) replace branch */
+  const noteEmptyForImport = useMemo(() => {
+    const floatsEmpty = Object.values(floatingElementsByPage).every((f) => !f || f.length === 0);
+    if (!floatsEmpty) return false;
+    return pages.every((p) => {
+      const c = p.content?.content as Array<{ type?: string; content?: unknown[] }> | undefined;
+      if (!Array.isArray(c) || c.length === 0) return true;
+      return c.every((b) => b?.type === 'paragraph' && (!Array.isArray(b.content) || b.content.length === 0));
+    });
+  }, [pages, floatingElementsByPage]);
   const subject = subjects.find((s) => s._id === subjectId);
 
   /* Thumbnails for the pages sidebar — refreshed (debounced) from the
@@ -2472,7 +2706,7 @@ export default function EditorPage() {
               tab={panelTab}
               onTabChange={setPanelTab}
               title={title}
-              onTitleChange={(t) => { setTitle(t); debouncedSave(); }}
+              onTitleChange={handleTitleChange}
               saveState={saveState}
               favorite={favorite}
               onToggleFavorite={toggleFavorite}
@@ -2529,6 +2763,9 @@ export default function EditorPage() {
             onShowShortcuts={() => setShortcutsOpen(true)}
             onExportWord={exportWord}
             onExportHtml={exportHtml}
+            onExportPnote={() => void exportPnoteFile()}
+            onCopyActivePage={() => void copyActivePage()}
+            onImportFile={() => setImportOpen(true)}
             wordCount={outline.wordCount}
             border={border}
             onBorderChange={patchBorder}
@@ -2542,7 +2779,13 @@ export default function EditorPage() {
             saveState={saveState}
             /* collaboration presence (group notes only) — separate concern
                from SaveState, rendered beside it in the Ribbon */
-            collabPresence={collabActive && collabState ? <CollabPresenceChip state={collabState} /> : null}
+            /* §7: the ordered page ids let the presence popover show «صفحه ۵»
+               for a collaborator's current page (derived — no new protocol);
+               capacity-blocked users get the seat-request action INSIDE the
+               popover (the honest recovery path — §32, no upgrade modal) */
+            collabPresence={collabActive && collabState
+              ? <CollabPresenceChip state={collabState} pageIds={pages.map((p) => p.id)} onRequestSeat={collab.requestSeat} />
+              : null}
           />
           <div className="pn-editor-scroll flex-1 overflow-y-auto py-8"          onContextMenu={(e) => {
             // Suppress the native browser menu over the editor workspace
@@ -2573,7 +2816,15 @@ export default function EditorPage() {
             <div className={`document-pages${eduTinted ? ' edu-tinted' : ''}`} style={{ zoom }}>
               {pages.map((page) => (
                 <PageComponent
-                  key={page.id}
+                  /* NOTE-SCOPED key: route param + page id. Page ids alone are
+                     NOT unique across notes (every note's first page is `p1`)
+                     and EditorPage persists across /editor/:id → /editor/:id
+                     navigations (import → «ایجاد جزوهٔ جدید») — a bare page.id
+                     key kept the PREVIOUS note's mounted p1 editor rendering
+                     while the imported/loaded content sat unused in state
+                     (the «صفحهٔ اول خالی ایمپورت شد» report). The note-scoped
+                     key remounts every sheet exactly when the note changes. */
+                  key={`${id}:${page.id}`}
                   pageId={page.id}
                   pageNumber={page.pageNumber}
                   kind={page.kind}
@@ -2643,16 +2894,34 @@ export default function EditorPage() {
         html={buildFullHtml() || html}
         pages={exportPages.map((p) => ({ ...p, html: renderMathInHtml(p.html) }))}
         meta={{ title: title || 'Untitled', subject: subject?.name, chapter }}
+        /* PER-NOTE design: the print/PDF pipeline renders THIS note's frame
+           and edu styling (falls back to the user's global design) */
+        noteBorder={border}
+        noteEduBlocks={eduBlocks}
       />
       <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       {/* کادرهای آموزشی customization — the same generated CSS also feeds
           the print/PDF pipeline so export always mirrors the editor */}
       <style dangerouslySetInnerHTML={{ __html: eduCss }} />
-      <EduBlocksModal open={eduBlocksOpen} onClose={() => setEduBlocksOpen(false)} />
+      {/* per-note scope: the modal edits THIS note's design (content.noteDesign) */}
+      <EduBlocksModal
+        open={eduBlocksOpen}
+        onClose={() => setEduBlocksOpen(false)}
+        noteEduBlocks={eduBlocks}
+        onSaveNoteEduBlocks={patchNoteEduBlocks}
+      />
       <CoverInsertModal
         open={coverInsertOpen}
         onClose={() => setCoverInsertOpen(false)}
         onInsert={addSpecialPage}
+      />
+      {/* §10 — وارد کردن فایل: .pnote (بازیابی کامل) / .pdf (تبدیل بهترین‌تلاشی) */}
+      <ImportFileModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        currentNoteHasContent={!noteEmptyForImport}
+        currentNoteTitle={title}
+        onApply={(info) => void applyImport(info)}
       />
       {/* مودال هوشمند بازه‌ی صفحات — سربرگ/قالب روی ۱-۱۰، ۱۸-۳۱، فرد/زوج */}
       <PageRangeModal

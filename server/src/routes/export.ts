@@ -66,8 +66,8 @@ const TYPO_CSS = `
      arrive as width/height attributes from the client (Word reads the
      attributes, not CSS, on <col>/<tr>). */
   .pn-doc-body table { border-collapse: collapse; table-layout: auto; margin: 0.6em 0; border-radius: 8px; }
-  .pn-doc-body table td, .pn-doc-body table th { border: 1px solid #ebebeb; padding: 8px 12px; vertical-align: top; background: #ffffff; }
-  .pn-doc-body table th { background: #fafafa; color: #171717; font-weight: 600; font-size: 0.9em; }
+  .pn-doc-body table td, .pn-doc-body table th { border: 1px solid #c8bce8; padding: 8px 12px; vertical-align: top; background: #ffffff; }
+  .pn-doc-body table th { background: #f2ecfb; color: #171717; font-weight: 600; font-size: 0.9em; }
   .pn-doc-body table td p, .pn-doc-body table th p { margin: 0 0 0.5em; }
   .pn-doc-body table td p:last-child, .pn-doc-body table th p:last-child { margin-bottom: 0; }
   .pn-doc-body img { max-width: 100%; border-radius: 8px; margin: 0.5em 0; }

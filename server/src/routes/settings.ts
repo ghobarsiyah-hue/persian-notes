@@ -103,6 +103,11 @@ const settingsSchema = z.object({
       showFooter: z.boolean().optional(),
       showPageNumbers: z.boolean().optional(),
       sideLabel: z.string().max(120).optional(),
+      /** lesson/chapter label in the frame's top header slot — the client
+       *  BorderSettings carries it (design panel + range modal); without
+       *  this line zod SILENTLY STRIPPED it on every PUT, so the سربرگ
+       *  vanished on every reload */
+      headerLabel: z.string().max(120).optional(),
     })
     .optional(),
   /** fallback-avatar preset — 'auto' (name-hash) or one of the bot profile

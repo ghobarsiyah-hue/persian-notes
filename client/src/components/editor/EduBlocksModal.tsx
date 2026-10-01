@@ -209,9 +209,20 @@ function ColorSwatches({ value, onChange, allowClear = true }: { value: string |
 
 type ModalTab = 'presets' | 'style' | 'colors' | 'icons';
 
-export function EduBlocksModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function EduBlocksModal({ open, onClose, noteEduBlocks, onSaveNoteEduBlocks }: {
+  open: boolean; onClose: () => void;
+  /** per-note scope: the NOTE's current eduBlocks (overrides the global one) */
+  noteEduBlocks?: EduBlocksSettings;
+  /** per-note scope: save target — writes the note's design, not user settings */
+  onSaveNoteEduBlocks?: (edu: EduBlocksSettings) => void;
+}) {
   const { settings, saveEduBlocks, toast } = useApp();
-  const current = settings?.editor.eduBlocks;
+  /* PER-NOTE scope (opened from a note editor): an optional override for
+     the current design + save target. EditorPage passes its note-local
+     design so the customization lands in the NOTE (content.noteDesign),
+     never in the user's global settings. The global path (تنظیمات page)
+     keeps using saveEduBlocks. */
+  const current = noteEduBlocks ?? settings?.editor.eduBlocks;
   const initial = useMemo<EduBlocksSettings>(
     () => (current && typeof current === 'object' ? { ...DEFAULT_EDU_BLOCKS, ...current } : DEFAULT_EDU_BLOCKS),
     [current],
@@ -233,7 +244,8 @@ export function EduBlocksModal({ open, onClose }: { open: boolean; onClose: () =
   const save = async () => {
     setBusy(true);
     try {
-      await saveEduBlocks(draft);
+      if (onSaveNoteEduBlocks) await onSaveNoteEduBlocks(draft);
+      else await saveEduBlocks(draft);
       toast('شخصی‌سازی کادرهای آموزشی ذخیره شد.', 'success');
       onClose();
     } catch (e) {
@@ -583,8 +595,8 @@ export function EduBlocksModal({ open, onClose }: { open: boolean; onClose: () =
         </div>
       </div>
 
-      {/* footer */}
-      <div className="mt-5 flex items-center justify-between border-t border-ink-100 pt-4 dark:border-ink-800">
+      {/* footer — docked to the panel's bottom edge */}
+      <div className="pn-side-footer mt-auto flex shrink-0 items-center justify-between border-t border-ink-100 pt-4 dark:border-ink-800">
         <span className="text-[12px] text-ink-500">
           {dirty ? 'تغییرات ذخیره نشده' : 'هماهنگ با تنظیمات فعلی'} — استایل در چاپ و PDF هم اعمال می‌شود.
         </span>

@@ -63,7 +63,11 @@ router.post(
     note.revision = (note.revision ?? 0) + 1;
     await note.save();
 
-    /* live collaboration room → system restore inside the room */
+    /* live collaboration room → system restore inside the room.
+       §19 CORRUPTION DEFENSE: applySystemRestore VALIDATES the restored
+       snapshot first — an invalid version payload throws here, the Note
+       keeps its pre-restore (last-known-good) state and the user gets the
+       explicit error instead of silent corruption. */
     try {
       const { getRoom, applySystemRestore } = await import('../collab/rooms.js');
       const room = getRoom(String(note._id));
@@ -73,7 +77,13 @@ router.post(
         const { broadcastRestored } = await import('../collab/hub.js');
         broadcastRestored(String(note._id), note.content as unknown as Record<string, unknown>);
       }
-    } catch { /* room infra not booted (tests) — restore still worked */ }
+    } catch (err) {
+      /* room infra not booted (tests) — restore still worked; a VALIDATION
+         rejection is a real failure the user must see */
+      if (String((err as Error)?.message ?? '').startsWith('restore rejected:')) {
+        throw new ApiError(400, 'نسخهٔ انتخابی قابل بازیابی نیست — سند ذخیره‌شده در این نسخه معتبر تشخیص داده نشد.');
+      }
+    }
 
     res.json({ note: await note.populate([{ path: 'tags' }, { path: 'subjectId', select: 'name color parentId' }]) });
   })

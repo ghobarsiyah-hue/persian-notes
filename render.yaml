@@ -1,0 +1,24 @@
+# Render Blueprint — Persian Notes (کلاینت + API + WebSocket در یک سرویس)
+# دیپلوی: Render Dashboard → New → Blueprint → انتخاب همین ریپو
+# راهنمای کامل: DEPLOY-RENDER.md
+
+services:
+  # ── اپلیکیشن (Express سروکنندهٔ کلاینت بیلدشده + API + WS) ──────────────
+  - type: web
+    name: persian-notes
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build -w client -w server
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: JWT_SECRET
+        generateValue: true          # Render یک راز تصادفی می‌سازد
+      - key: ALLOW_DB_FALLBACK
+        value: "false"
+      - key: SEED_ON_START
+        value: "false"
+      - key: MONGODB_URI
+        sync: false                  # بعد از ساخت سرویس، در داشبورد وارد می‌شود

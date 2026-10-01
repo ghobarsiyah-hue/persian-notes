@@ -21,7 +21,7 @@ import type { Editor } from '@tiptap/core';
 const STYLEABLE = new Set([
   'calloutBlock', 'questionBlock', 'exampleBlock', 'keyTermBlock',
   'longAnswerBlock', 'footnoteBlock', 'highlightBox', 'referenceBlock',
-  'timeline', 'trueFalseBlock', 'mcqBlock',
+  'timeline', 'trueFalseBlock', 'mcqBlock', 'matrixCompareBlock', 'orderStepsBlock',
 ]);
 /** quiz families that expose the variant + answer-placement controls */
 const QUIZ_STYLEABLE = new Set(['questionBlock', 'trueFalseBlock', 'mcqBlock', 'longAnswerBlock']);
@@ -107,6 +107,8 @@ const TITLE_ATTR: Record<string, string> = {
   timeline: 'title',
   trueFalseBlock: 'question',
   mcqBlock: 'qTitle',
+  matrixCompareBlock: 'topic',
+  orderStepsBlock: 'topic',
 };
 
 /** current plain text of the block's body (first paragraph level) */
@@ -366,7 +368,7 @@ function EduBlockStyleModalInner({ editor, state, onClose }: {
         </div>
       </div>
 
-      <div className="mt-5 flex justify-end gap-2.5 border-t border-ink-100 pt-4 dark:border-ink-800">
+      <div className="pn-side-footer mt-auto flex shrink-0 justify-end gap-2.5 border-t border-ink-100 pt-4 dark:border-ink-800">
         <Button variant="secondary" onClick={() => requestClose(false)}>انصراف</Button>
         <Button onClick={apply}>اعمال</Button>
       </div>
@@ -410,22 +412,181 @@ function replaceBodyText(editor: Editor, pos: number, text: string) {
   }
 }
 
-export function openEduBlockStyleModal(editor: Editor) {
-  const state = readState(editor);
-  if (!state) return;
+/* ── LIVE TARGET TRACKING (the «سوییچ» behavior) ────────────────────────
+   The modal used to be a static snapshot: once open, clicking ANOTHER edu
+   block (or empty page) changed nothing — the panel kept editing the OLD
+   node and never followed the user's next click. The host now tracks the
+   live selection itself:
 
+   • caret/click lands on a DIFFERENT edu block  → the modal re-reads that
+     block and SWITCHES (box ⇄ question variant picked by the block type)
+   • caret lands on a NON-edu target (plain paragraph, empty page, image…)
+     → the modal CLOSES (its subject is gone; a stale panel is confusing)
+   • pure text edits INSIDE the currently-styled block never re-open/re-target
+     (typing must not fight the panel)
+
+   The watcher lives in the same module-level root as the modal so both
+   entry points (ribbon button, right-click menu) behave identically. */
+
+let trackedEditor: Editor | null = null;
+let trackedPos = -1;
+let trackedType = '';
+let trackedMode: 'box' | 'question' = 'box';
+let onTransaction: (() => void) | null = null;
+
+function stopTracking() {
+  if (onTransaction) document.removeEventListener('selectionchange', onTransaction);
+  trackedEditor = null;
+  trackedPos = -1;
+  trackedType = '';
+  onTransaction = null;
+}
+
+function renderFor(editor: Editor, mode: 'box' | 'question'): boolean {
+  const state = mode === 'question' ? readQuestionState(editor) : readState(editor);
+  if (!state) return false;
   const { root } = ensureHost();
-  const close = () => {
-    root.render(null);
-  };
+  trackedEditor = editor;
+  trackedPos = state.nodePos;
+  trackedType = state.nodeType;
+  trackedMode = mode;
+  /* Multi-page gotcha: each sheet owns its OWN TipTap editor, and a click on
+     another page moves THAT editor's selection — the tracked editor's
+     transaction hook never fires for it. document-level 'selectionchange'
+     covers every editor (and fires even when the caret only collapses). */
+  if (!onTransaction) {
+    onTransaction = () => retargetIfSelectionMoved();
+    document.addEventListener('selectionchange', onTransaction);
+  }
+  if (mode === 'question') {
+    root.render(<QuestionStyleModalInner editor={editor} state={state as never} onClose={() => closeStyleModal()} />);
+  } else {
+    root.render(
+      <EduBlockStyleModalContainer
+        editor={editor}
+        state={state as never}
+        onClose={() => closeStyleModal()}
+      />,
+    );
+  }
+  return true;
+}
 
-  root.render(
-    <EduBlockStyleModalContainer
-      editor={editor}
-      state={state}
-      onClose={() => close()}
-    />,
+/** called on document selectionchange while a modal is open. The CLICK path
+ *  (the click-follow deferred handler) is the authority for switching —
+ *  it reads the FINAL post-click selection. Here we only
+ *  handle the leave-cases the click handler cannot see: keyboard caret moves
+ *  (arrows, Ctrl+Home) and programmatic selections. */
+function retargetIfSelectionMoved() {
+  if (!trackedEditor) return;
+  const sel = window.getSelection();
+  const anchorEl = sel?.anchorNode instanceof Element ? sel.anchorNode : sel?.anchorNode?.parentElement ?? null;
+  const anchorInTracked = !!anchorEl && (trackedEditor.view.dom === anchorEl || trackedEditor.view.dom.contains(anchorEl));
+  const activeInTracked = trackedEditor.isFocused ||
+    (document.activeElement instanceof Element &&
+      (document.activeElement === trackedEditor.view.dom || trackedEditor.view.dom.contains(document.activeElement)));
+  if (!anchorInTracked && !activeInTracked) {
+    closeStyleModal();
+    return;
+  }
+  const hit = findEduNode(trackedEditor);
+  if (!hit) {
+    /* keyboard move left the edu block entirely */
+    closeStyleModal();
+    return;
+  }
+}
+
+/** imperative close — also tears the tracker down (both modal variants call it) */
+export function closeStyleModal() {
+  stopTracking();
+  ensureHost().root.render(null);
+}
+
+export function openEduBlockStyleModal(editor: Editor) {
+  if (!renderFor(editor, 'box')) return;
+}
+
+/* ── CLICK-FOLLOW — panel follow behavior (OPEN stays EXPLICIT) ─────────
+   1. panel CLOSED + click on an edu block  → NOTHING opens. The click's
+      only visible response is the contextual «کادر آموزشی/سوال» ribbon tab
+      activating (the horizontal menu) plus the right-click menu. Opening
+      شخصی‌سازی is a deliberate act: the ribbon button or the right-click
+      شخصی‌سازی entry. (Auto-open on click was removed TWICE now — the
+      installer used to render the side panel on every block click, which
+      the user explicitly rejected: «نباید خودکار وقتی روی یه کادر آموزشی
+      کلیک میکنی مودال چپش باز شه».)
+   2. panel OPEN + click on another edu block → the panel SWITCHES to it
+   3. panel OPEN + click on an empty page spot (trailing paragraph OR the
+      page margin outside the editor) → the panel CLOSES
+   Typing never triggers any of this — the trigger is a real editor DOM
+   click with a settled selection, never a transaction alone.
+
+   Multi-page gotcha: each sheet owns its OWN TipTap editor, so this is
+   installed per page editor (Page.tsx). The margin case (#3 for clicks
+   outside every editor) is one SHARED document-level listener below. */
+
+const clickFollowInstalled = new WeakSet<Editor>();
+
+/** one shared document-level listener: a click on a page's margin/chrome
+ *  (inside .page-paper but NOT inside any ProseMirror editor) closes the
+ *  panel — the caret never moved, so selectionchange cannot see it */
+let docMarginCloseInstalled = false;
+function installDocMarginClose() {
+  if (docMarginCloseInstalled || typeof document === 'undefined') return;
+  docMarginCloseInstalled = true;
+  document.addEventListener(
+    'click',
+    (e) => {
+      if (!trackedEditor) return;
+      const t = e.target instanceof Element ? e.target : null;
+      if (!t) return;
+      const paper = t.closest('.page-paper');
+      if (!paper) return; /* ribbon, menus, the panel itself… — not ours */
+      if (t.closest('.ProseMirror')) return; /* editor clicks: per-editor handler */
+      closeStyleModal();
+    },
+    true,
   );
+}
+
+/** install the click-follow behavior on ONE page editor (idempotent) */
+export function installEduPanelClickFollow(editor: Editor) {
+  if (clickFollowInstalled.has(editor)) return;
+  clickFollowInstalled.add(editor);
+  installDocMarginClose();
+  const dom = editor.view.dom as HTMLElement;
+  dom.addEventListener('click', () => {
+    /* defer past the selectionchange close-race: clicking block B while the
+       modal edits block A fires A's close (selectionchange) AND this click.
+       The close and the re-open must collapse into ONE switch, so run after
+       the selectionchange handler settled and re-check the live target. */
+    setTimeout(() => {
+      const hit = findEduNode(editor);
+      /* empty spot inside the editor (trailing paragraph) → close only */
+      if (!hit) {
+        if (trackedEditor) closeStyleModal();
+        return;
+      }
+      const mode: 'box' | 'question' = QUIZ_STYLEABLE.has(hit.type) ? 'question' : 'box';
+      /* panel closed → do NOTHING (behavior #1: no auto-open). While open,
+         clicks keep switching the target (#2) — never re-open from closed. */
+      if (trackedEditor) {
+        /* already showing THIS node in the matching mode? leave it alone */
+        if (trackedEditor === editor && trackedPos === hit.pos && trackedMode === mode) return;
+        renderFor(editor, mode);
+      }
+    }, 0);
+  });
+}
+
+/** open the QUESTION modal for the current selection — falls back to the
+ *  box modal when the caret is NOT in a quiz family so the click always
+ *  yields a visible panel (the silent no-op read as «مودال باز نمیشه») */
+export function openEduQuestionStyleModal(editor: Editor): boolean {
+  if (renderFor(editor, 'question')) return true;
+  openEduBlockStyleModal(editor);
+  return false;
 }
 
 /* ════════════════════════════════════════════════════════════════════════
@@ -448,6 +609,7 @@ interface QuestionStyleState {
   qAccent: string;
   qChip: string;
   qGap: string;
+  answerText: string;
   nodePos: number;
   nodeType: string;
 }
@@ -478,6 +640,7 @@ function readQuestionState(editor: Editor): QuestionStyleState | null {
     qAccent: (a.qAccent as string) || '',
     qChip: (a.qChip as string) || '',
     qGap: (a.qGap as string) || '',
+    answerText: (a.answerText as string) || '',
     nodePos: hit.pos,
     nodeType: hit.type,
   };
@@ -502,6 +665,9 @@ function QuestionStyleModalInner({ editor, state, onClose }: {
         qAccent: s.qAccent,
         qChip: s.qChip,
         qGap: s.qGap,
+        /* تشریحی/کوتاه: the end-of-block answer line text — longAnswerBlock
+           now DECLARES the attr (schema) so setNodeMarkup persists it */
+        answerText: s.answerText,
         ...(s.nodeType === 'mcqBlock' ? { layout: s.mcqLayout === 'grid' ? 'grid' : 'stacked' } : {}),
       }));
       onClose();
@@ -602,6 +768,23 @@ function QuestionStyleModalInner({ editor, state, onClose }: {
           </div>
         </div>
 
+        {/* متن پاسخ — کوتاه/تشریحی: the end-of-block answer line content */}
+        {(s.nodeType === 'longAnswerBlock' || s.nodeType === 'questionBlock') && (
+          <label className="block">
+            <span className="mb-1 block text-[12px] font-medium text-ink-600 dark:text-ink-400">متن پاسخ (خط انتهای سوال)</span>
+            <input
+              value={s.answerText}
+              onChange={(e) => patch({ answerText: e.target.value })}
+              placeholder="خالی = بدون خط پاسخ"
+              dir="rtl"
+              className="h-9 w-full rounded-lg border border-ink-200 bg-white px-3 text-[13px] outline-none transition-colors placeholder:text-ink-300 focus:border-[#0070f3] dark:border-ink-700 dark:bg-ink-900 dark:text-ink-100"
+            />
+            {s.answerText && s.answerAt !== 'end' && (
+              <span className="mt-1 block text-[11px] text-amber-600 dark:text-amber-400">برای نمایش این پاسخ، جایگاه پاسخ را روی «انتهای سوال» بگذارید.</span>
+            )}
+          </label>
+        )}
+
         {/* جایگاه پاسخ — MCQ + TF only */}
         {s.nodeType !== 'longAnswerBlock' && (
           <section>
@@ -632,22 +815,12 @@ function QuestionStyleModalInner({ editor, state, onClose }: {
         )}
       </div>
 
-      <div className="mt-5 flex justify-end gap-2.5 border-t border-ink-100 pt-4 dark:border-ink-800">
+      <div className="pn-side-footer mt-auto flex shrink-0 justify-end gap-2.5 border-t border-ink-100 pt-4 dark:border-ink-800">
         <Button variant="secondary" onClick={onClose}>انصراف</Button>
         <Button onClick={apply}>اعمال</Button>
       </div>
     </SidePanel>
   );
-}
-
-/** open the QUESTION modal — no-op unless the selection resolves to one of
- *  the four quiz families (check the CALLER side for graceful fallback) */
-export function openEduQuestionStyleModal(editor: Editor) {
-  const state = readQuestionState(editor);
-  if (!state) return false;
-  const { root } = ensureHost();
-  root.render(<QuestionStyleModalInner editor={editor} state={state} onClose={() => root.render(null)} />);
-  return true;
 }
 
 /** wrapper so the modal can persist text edits on اعمال */

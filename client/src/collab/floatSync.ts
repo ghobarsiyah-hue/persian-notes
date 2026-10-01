@@ -31,6 +31,40 @@
 import * as Y from 'yjs';
 import type { CollabSession } from './session';
 
+/* ═════════════════════════════════════════════════════════════════════
+   §23 DRAG POLICY — deterministic local-interaction-wins rule.
+
+   While THIS tab is actively dragging/resizing/rotating an object, remote
+   commits for THAT object must not fight the pointer. The gesture is
+   registered here (protectedFloatRef, set/cleared by EditorPage around the
+   FloatingLayer's live geometry channel); the float reconcile SKIPS
+   property application for protected objects entirely — the local visual
+   state wins temporarily, the final pointerup commits, and the canonical
+   yjs state converges from that commit. A remote change to a DIFFERENT
+   object on the same page still lands normally.
+
+   The protection is per-object and gesture-scoped: it can never produce a
+   permanent divergence, because the object is republished at pointerup
+   (the normal commit path) and the NEXT remote op reconciles freely.
+   ═════════════════════════════════════════════════════════════════════ */
+export interface ProtectedFloat {
+  pageId: string;
+  objectId: string;
+}
+
+/** module-level ref holder — EditorPage assigns one stable ref here so the
+ *  reconcile path (and tests) can read/write the protected gesture without
+ *  re-rendering anything (a ref, not React state — §25 hot-path rule). */
+export const protectedFloatRef: { current: ProtectedFloat | null } = { current: null };
+
+export function setProtectedFloat(pageId: string | null, objectId: string | null): void {
+  protectedFloatRef.current = pageId && objectId ? { pageId, objectId } : null;
+}
+
+export function getProtectedFloat(): ProtectedFloat | null {
+  return protectedFloatRef.current;
+}
+
 /** OUT: CREATE_FLOAT — after the element exists in local state */
 export function floatUpsert(session: CollabSession, pageId: string, obj: Record<string, unknown>): void {
   session.opUpsertFloat(pageId, obj);
@@ -62,9 +96,11 @@ export function floatDiff(prev: Record<string, unknown> | undefined, next: Recor
  * Returns a NEW array when something changed, or the SAME reference when
  * nothing did (identity-stable → no React churn, §25).
  *
- * `localOriginIds` are object ids THIS tab created/patched during its own
- * un-acked local transactions; they are reconciled too (the yjs state is
- * canonical), but they are never the reason to skip an update.
+ * §23 DRAG POLICY: the object currently under a LOCAL gesture (drag/resize/
+ * rotate — see getProtectedFloat) keeps its LOCAL geometry; remote traffic
+ * for it is skipped entirely for the duration of the gesture. The pointerup
+ * commit republishes the final geometry, so the canonical state converges
+ * and the skip can never become a permanent divergence.
  */
 export function reconcileFloatsFromSession(
   session: CollabSession,
@@ -72,31 +108,57 @@ export function reconcileFloatsFromSession(
   local: Array<Record<string, unknown>>
 ): Array<Record<string, unknown>> | null {
   const remote = session.readFloatObjects(pageId);
-  const remoteIds = new Set(remote.map((r) => String(r.id)));
-  const localIds = new Set(local.map((l) => String(l.id)));
+  const protectedId = getProtectedFloat();
+  const draggingId = protectedId && protectedId.pageId === pageId ? protectedId.objectId : null;
+
+  /* the local object under an active gesture: shielded from remote below */
+  const draggingLocal = draggingId
+    ? local.find((l) => String(l.id) === draggingId)
+    : undefined;
+
+  const effectiveRemote = draggingId
+    ? remote.filter((r) => String(r.id) !== draggingId)
+    : remote;
+  const effectiveLocal = draggingId
+    ? local.filter((l) => String(l.id) !== draggingId)
+    : local;
+
+  const remoteIds = new Set(effectiveRemote.map((r) => String(r.id)));
+  const localIds = new Set(effectiveLocal.map((l) => String(l.id)));
 
   const changed =
     remoteIds.size !== localIds.size ||
-    remote.some((r) => {
-      const l = local.find((x) => String(x.id) === String(r.id));
+    effectiveRemote.some((r) => {
+      const l = effectiveLocal.find((x) => String(x.id) === String(r.id));
       return !l || JSON.stringify(sortKeys(l)) !== JSON.stringify(sortKeys(r));
     });
   if (!changed) return null;
 
   /* merge strategy: remote per-object state is canonical for properties;
-     objects that exist only locally (created offline / not yet published)
-     are KEPT (never silently dropped — no data loss, §36); objects that
-     exist only remotely are ADDED; remote-deleted objects are REMOVED. */
+     objects that exist only remotely are ADDED; remote-deleted objects are
+     REMOVED. Objects that exist only locally are KEPT — UNLESS the id is
+     tombstoned (§24): a tombstoned local-only copy is the STALE MIRROR of
+     an object that was deleted (locally or concurrently remotely), and
+     keeping it would resurrect the deleted object into autosave/exports.
+     Deletion wins deterministically; a deliberate re-create goes through
+     opUpsertFloat, which clears the tombstone. */
   const merged: Array<Record<string, unknown>> = [];
-  const byRemoteId = new Map(remote.map((r) => [String(r.id), r]));
-  for (const l of local) {
+  const byRemoteId = new Map(effectiveRemote.map((r) => [String(r.id), r]));
+  for (const l of effectiveLocal) {
     const id = String(l.id);
     const r = byRemoteId.get(id);
     if (r) merged.push(r);
-    else if (!remoteIds.has(id)) merged.push(l); /* local-only object survives */
+    else if (!remoteIds.has(id) && !session.isFloatTombstoned(pageId, id)) merged.push(l); /* local-only object survives */
   }
-  for (const r of remote) {
+  for (const r of effectiveRemote) {
     if (!localIds.has(String(r.id))) merged.push(r);
+  }
+  /* re-insert the protected object at its ORIGINAL local position so the
+     React array order (z-order painting) is not disturbed mid-gesture */
+  if (draggingLocal) {
+    const origIdx = local.findIndex((l) => String(l.id) === draggingId);
+    const insertAt = Math.min(Math.max(0, origIdx), merged.length);
+    merged.splice(insertAt, 0, draggingLocal);
   }
   return merged;
 }

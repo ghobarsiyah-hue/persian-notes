@@ -153,6 +153,8 @@ const REGISTRY: Record<string, BreakPolicy> = {
      ATOMIC would bounce whole questions and fight the AutoFlow engine */
   trueFalseBlock: CONTAINER,
   mcqBlock: CONTAINER,
+  matrixCompareBlock: CONTAINER,
+  orderStepsBlock: CONTAINER,
 
   /* genuinely atomic objects — never split, never re-join */
   image: ATOMIC,

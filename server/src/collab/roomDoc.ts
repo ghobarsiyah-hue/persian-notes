@@ -45,9 +45,18 @@ export function floatListFromYRoom(room: CollabRoom, pageId: string): Array<Reco
  *  (pageOrder + pageMeta) written by the clients' semantic ops. */
 export function docJsonFromYRoom(room: CollabRoom): Record<string, unknown> | null {
   const structure = room.structure;
-  /* a client-submitted merged doc always wins when fresh */
+  /* a client-submitted merged doc wins ONLY while the room has not moved
+     past the generation that produced it (STALE-SNAPSHOT GUARD §15/§16):
+     once the room mutates again, the canonical projection below (semantic
+     pageOrder + fragments + floatObj maps) is the source — a stale client
+     shadow can never overwrite newer collaborative state. Rooms without a
+     recorded generation (legacy) keep the old always-prefer behavior. */
   const pending = structure.get('pendingDoc');
-  if (pending && typeof pending === 'object') return pending as Record<string, unknown>;
+  const pendingGen = structure.get('pendingDocGeneration');
+  if (pending && typeof pending === 'object' &&
+      (!(typeof pendingGen === 'number') || pendingGen >= room.roomGeneration)) {
+    return pending as Record<string, unknown>;
+  }
 
   /* SEMANTIC source of truth: pageOrder + pageMeta */
   const order = room.pageOrder.toArray();
